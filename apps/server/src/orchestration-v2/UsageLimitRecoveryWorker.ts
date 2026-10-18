@@ -1,4 +1,9 @@
-import { CommandId, MessageId, type OrchestrationV2Command } from "@t3tools/contracts";
+import {
+  CommandId,
+  MessageId,
+  resolveProjectProviderInstanceEnabled,
+  type OrchestrationV2Command,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -8,9 +13,11 @@ import * as DueHint from "../scheduling/DueHint.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
+import { nextUsageLimitHandoff } from "./usageLimitHandoff.ts";
 
 const MAX_OVERDUE_ARM_MS = 24 * 60 * 60 * 1000;
 
@@ -92,6 +99,7 @@ const makeSweep = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const orchestrator = yield* Orchestrator.OrchestratorV2;
   const settings = yield* ServerSettings.ServerSettingsService;
+  const providers = yield* ProviderRegistry.ProviderRegistry;
   const due = DueHint.make();
   yield* forkParked(
     Stream.runForEach(orchestrator.streamDomainEvents, (event) =>
@@ -99,6 +107,8 @@ const makeSweep = Effect.gen(function* () {
     ),
   );
   yield* forkParked(Stream.runForEach(settings.streamChanges, () => due.invalidate));
+  // A fresh quota reading can free a handoff target.
+  yield* forkParked(Stream.runForEach(providers.streamChanges, () => due.invalidate));
   return Effect.fn("UsageLimitRecoveryWorker.sweep")(function* () {
     const now = yield* DateTime.now;
     const nowMs = DateTime.toEpochMillis(now);
@@ -109,15 +119,48 @@ const makeSweep = Effect.gen(function* () {
       now,
       autoResume: preferences.autoResumeLimitedThreads,
       snooze: preferences.snoozeLimitedThreads,
+      handoff: preferences.usageLimitHandoffOrder.length > 1,
     });
+    const available = yield* providers.getProviders;
     let acted = false;
+    let awaitingHandoff = false;
     for (const thread of candidates) {
-      const command = limitRecoveryCommand(
-        thread,
-        preferences.autoResumeLimitedThreads,
-        nowMs,
-        preferences.snoozeLimitedThreads,
+      const order = preferences.usageLimitHandoffOrder.filter((selection) =>
+        resolveProjectProviderInstanceEnabled(preferences, thread.projectId, selection.instanceId),
       );
+      const target =
+        thread.snoozedUntil != null && DateTime.toEpochMillis(thread.snoozedUntil) > nowMs
+          ? undefined
+          : nextUsageLimitHandoff({
+              order,
+              current: thread.modelSelection,
+              providers: available,
+              runtimeMode: thread.runtimeMode,
+              nowMs,
+            });
+      const identity = `limit-handoff:${thread.id}:${thread.latestRunId}`;
+      const command: OrchestrationV2Command | null =
+        target === undefined
+          ? limitRecoveryCommand(
+              thread,
+              preferences.autoResumeLimitedThreads,
+              nowMs,
+              preferences.snoozeLimitedThreads,
+            )
+          : {
+              type: "message.dispatch",
+              commandId: CommandId.make(identity),
+              messageId: MessageId.make(identity),
+              threadId: thread.id,
+              usageLimitHandoffOfRunId: thread.latestRunId!,
+              modelSelection: target,
+              text: "Continue where you left off. The previous provider reached its usage limit; use the transferred conversation context and check the current workspace before continuing.",
+              attachments: [],
+              dispatchMode: { type: "start_immediately" },
+              createdBy: "user",
+              creationSource: "server",
+            };
+      if (target === undefined && order.length > 1) awaitingHandoff = true;
       if (command === null) continue;
       acted = true;
       yield* Effect.gen(function* () {
@@ -139,8 +182,9 @@ const makeSweep = Effect.gen(function* () {
         ),
       );
     }
-    // A sweep that acted, or failed to, re-checks on the next tick.
-    if (acted) return;
+    // A sweep that acted, or failed to, re-checks on the next tick. So does one with a thread
+    // waiting for a handoff target: an account can free up when its reset time passes.
+    if (acted || awaitingHandoff) return;
     const wakeAt = yield* projections.getLimitRecoveryWakeAt(now);
     yield* due.record(readVersion, wakeAt ?? Infinity, nowMs);
   });
