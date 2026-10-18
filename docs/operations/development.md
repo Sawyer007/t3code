@@ -15,6 +15,26 @@ a new browser.
 
 Prefer a container? See [Dev container](../internals/devcontainer.md) for VS Code and Codespaces setup.
 
+## Maintaining the local automatic handoff patch
+
+Keep `main` free of fork-specific commits and track the original repository as `upstream`.
+Build and run the patched application from the separate `local/auto-handoff` worktree.
+Official binaries do not include this patch.
+
+On Windows with Node 24 and the worktree dependencies installed, update during an idle period:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update-auto-handoff.ps1
+```
+
+The script requires both checkouts to be clean, preserves the old patch branch under `backup/`,
+fast-forwards `main`, rebases the patch, and runs focused tests, typechecks, and lint. It stops on
+conflicts or failed checks. Resolve conflicts in the patch worktree and use `git rebase --continue`,
+or `git rebase --abort` to return that worktree to its previous state. A failed check needs fixing
+before rebuilding. The script does not push, replace an installed application, or restart servers.
+
+Configure the server using [Automatic provider handoff](../user/usage.md#automatic-provider-handoff).
+
 ## Choosing a dev process
 
 Use `vp run dev` for server and web, or `vp run dev:desktop` for the Electron client.

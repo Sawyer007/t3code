@@ -4790,6 +4790,44 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
   ) {
     let projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+    if (command.usageLimitHandoffOfRunId !== undefined) {
+      const source = usageLimitBlockedRun(projection.runs, projection.turnItems, null);
+      const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
+      const order = settings.usageLimitHandoffOrder;
+      const sourceIndex = order.findIndex(
+        (selection) => selection.instanceId === source?.providerInstanceId,
+      );
+      const now = yield* DateTime.now;
+      if (
+        source?.id !== command.usageLimitHandoffOfRunId ||
+        threadShellFromProjection(projection).lastErrorClass !== "usage_limit" ||
+        sourceIndex < 0 ||
+        command.modelSelection === undefined ||
+        !order
+          .slice(sourceIndex + 1)
+          .some((selection) => modelSelectionsEqual(selection, command.modelSelection!)) ||
+        !modelSelectionsEqual(projection.thread.modelSelection, source.modelSelection) ||
+        command.dispatchMode.type !== "start_immediately" ||
+        projection.thread.archivedAt !== null ||
+        projection.thread.deletedAt !== null ||
+        projection.thread.settledOverride === "settled" ||
+        projection.runtimeRequests.some((request) => request.status === "pending") ||
+        (projection.thread.snoozedUntil != null &&
+          DateTime.toEpochMillis(projection.thread.snoozedUntil) > DateTime.toEpochMillis(now)) ||
+        (yield* stopReachedRun(command, command.threadId, source.id))
+      ) {
+        yield* emit(
+          events,
+          command,
+        )({
+          type: "thread.metadata-updated",
+          threadId: command.threadId,
+          occurredAt: now,
+          payload: projection.thread,
+        });
+        return;
+      }
+    }
     if (command.manualContinuationOfRunId !== undefined) {
       const source = projection.runs.find((run) => run.id === command.manualContinuationOfRunId);
       const limited = latestRootProviderFailure(source ?? null, projection.turnItems);

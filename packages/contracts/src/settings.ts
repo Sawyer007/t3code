@@ -1090,6 +1090,15 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
+const UsageLimitHandoffOrder = Schema.Array(ModelSelection).check(
+  Schema.isMaxLength(16),
+  Schema.makeFilter(
+    (order) =>
+      new Set(order.map((selection) => selection.instanceId)).size === order.length ||
+      "Each automatic handoff provider instance must appear only once.",
+  ),
+);
+
 export const ServerSettings = Schema.Struct({
   // Null means no client has migrated this preference yet; an empty value is
   // authoritative so another device cannot resurrect cleared preferences.
@@ -1163,6 +1172,9 @@ export const ServerSettings = Schema.Struct({
   compactIdleThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   snoozeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   autoResumeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  usageLimitHandoffOrder: UsageLimitHandoffOrder.pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   sidebarAutoSettleKeepPullRequests: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
@@ -1479,6 +1491,7 @@ export const ServerSettingsPatch = Schema.Struct({
   sidebarAutoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
+  usageLimitHandoffOrder: Schema.optionalKey(UsageLimitHandoffOrder),
   snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({

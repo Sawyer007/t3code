@@ -129,6 +129,41 @@ or endpoint configurations do not report subscription limits.
 API-key accounts may not report subscription limits. This also applies to Claude connections
 using a proxy through `ANTHROPIC_AUTH_TOKEN`.
 
+## Automatic provider handoff
+
+The local automatic handoff extension continues a conversation with another configured provider
+when the current provider reports a usage limit. It runs on the server, so the client can disconnect
+while the server machine stays awake. It does not require another request to the exhausted provider.
+
+Add an ordered list to the environment's `settings.json` (`userdata/settings.json` below T3 home):
+
+```json
+{
+  "usageLimitHandoffOrder": [
+    { "instanceId": "codex", "model": "your-codex-model" },
+    { "instanceId": "claudeAgent", "model": "your-claude-model" },
+    { "instanceId": "codex_secondary", "model": "your-codex-model" }
+  ],
+  "autoResumeLimitedThreads": true
+}
+```
+
+Merge these fields into the existing settings; replace the example model names and instance IDs
+with those configured in this environment. Each instance may appear once. Only conversations whose
+current instance appears in the list participate. The default empty list disables automatic handoff;
+set `usageLimitHandoffOrder` to `[]` to turn it off again.
+
+Handoffs move forward through the list, skipping unavailable, project-disabled, or known exhausted
+targets. Models on the same account can share the same limit; configure independently authenticated
+instances for separate accounts. If no later target is available, normal limit recovery applies:
+with **Auto-resume limited threads** enabled, the current provider resumes at its reported reset.
+A missing reset time requires manual continuation. The list does not cycle back to earlier entries.
+
+The conversation retains its workspace, permission mode, and saved history using the normal portable
+handoff. Native reasoning, tool state, and attachments are not replayed. Pending questions and
+approvals, Stop, snooze, archive, settlement, or a newer turn prevent an automatic continuation.
+Authentication failures and other provider errors do not trigger this feature.
+
 ## Connect a CLIProxyAPI hub
 
 To see pooled accounts, open **Settings → Providers → Usage providers → Add hub**. Choose the

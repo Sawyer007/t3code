@@ -283,7 +283,7 @@ const layerTest = Layer.mergeAll(
   Layer.provide(SqlitePersistence.layerMemory),
   Layer.provide(layerCheckpointStoreTest),
   Layer.provide(layerServerConfig),
-  Layer.provide(ServerSettings.layerTest()),
+  Layer.provideMerge(ServerSettings.layerTest()),
   Layer.provide(layerTestProviderInstanceRegistry),
   Layer.provide(layerGitWorkflowTest),
   Layer.provide(layerProjectServiceTest),
@@ -5470,6 +5470,261 @@ it.layer(layerSharedApplicationDataPlaneTest)("shared application data plane", (
 });
 
 it.layer(layerTest)("usage-limit recovery", (it) => {
+  it.effect.each([
+    "handoff",
+    "disabled",
+    "selection-changed",
+    "snoozed",
+    "stopped",
+    "settled",
+    "archived",
+    "new-run",
+    "pending-request",
+  ] as const)("automatically hands off a limited run only while eligible (%s)", (scenario) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const events = yield* EventSink.EventSinkV2;
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const threadId = ThreadId.make(`handoff:${scenario}`);
+      const projectId = ProjectId.make(`handoff:project:${scenario}`);
+      const target = { ...modelSelection, instanceId: alternateInstanceId };
+      const now = yield* DateTime.now;
+      yield* settings.updateSettings({ usageLimitHandoffOrder: [modelSelection, target] });
+      yield* seedProject({
+        projectId,
+        title: "Handoff test",
+        workspaceRoot: process.cwd(),
+        defaultModelSelection: modelSelection,
+        createdAt: DateTime.formatIso(now),
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`handoff:create:${scenario}`),
+        threadId,
+        projectId,
+        title: "Limited thread",
+        modelSelection,
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(`handoff:start:${scenario}`),
+        threadId,
+        messageId: MessageId.make(`handoff:start:${scenario}`),
+        text: "Complete the original task, preserving my edits.",
+        attachments: [],
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const source = (yield* orchestrator.getThreadProjection(threadId)).runs[0]!;
+      yield* events.write({
+        events: [
+          {
+            id: EventId.make(`handoff:failed:${scenario}`),
+            type: "run.updated",
+            threadId,
+            occurredAt: now,
+            payload: { ...source, status: "failed", completedAt: now },
+          },
+          {
+            id: EventId.make(`handoff:error:${scenario}`),
+            type: "turn-item.updated",
+            threadId,
+            occurredAt: now,
+            payload: {
+              id: TurnItemId.make(`handoff:error:${scenario}`),
+              type: "error",
+              threadId,
+              runId: source.id,
+              nodeId: source.rootNodeId,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: 2,
+              status: "failed",
+              title: "Limit reached",
+              startedAt: now,
+              completedAt: now,
+              updatedAt: now,
+              failure: {
+                class: "usage_limit",
+                message: "Plan limit reached.",
+                code: "usageLimitExceeded",
+                retryable: null,
+              },
+            },
+          },
+        ],
+      });
+      // Limit reports without a reset time still allow switching, but cannot schedule a timed retry.
+      assert.include(
+        (yield* store.getLimitRecoveryCandidates({
+          now,
+          autoResume: false,
+          snooze: false,
+          handoff: true,
+        })).map((candidate) => candidate.id),
+        threadId,
+      );
+      assert.notInclude(
+        (yield* store.getLimitRecoveryCandidates({ now, autoResume: true, snooze: false })).map(
+          (candidate) => candidate.id,
+        ),
+        threadId,
+      );
+      if (scenario === "disabled") yield* settings.updateSettings({ usageLimitHandoffOrder: [] });
+      if (scenario === "selection-changed")
+        yield* orchestrator.dispatch({
+          type: "thread.model-selection.set",
+          commandId: CommandId.make(`handoff:selection:${scenario}`),
+          threadId,
+          modelSelection: { ...modelSelection, model: "another-model" },
+        });
+      if (scenario === "snoozed")
+        yield* orchestrator.dispatch({
+          type: "thread.snooze",
+          commandId: CommandId.make(`handoff:snooze:${scenario}`),
+          threadId,
+          snoozedUntil: DateTime.formatIso(DateTime.add(now, { hours: 1 })),
+        });
+      if (scenario === "settled")
+        yield* orchestrator.dispatch({
+          type: "thread.settle",
+          commandId: CommandId.make(`handoff:settle:${scenario}`),
+          threadId,
+        });
+      if (scenario === "archived")
+        yield* orchestrator.dispatch({
+          type: "thread.archive",
+          commandId: CommandId.make(`handoff:archive:${scenario}`),
+          threadId,
+        });
+      if (scenario === "stopped")
+        yield* events.write({
+          events: [
+            {
+              id: EventId.make("handoff:stop"),
+              type: "turn-item.updated",
+              threadId,
+              occurredAt: now,
+              payload: {
+                id: TurnItemId.make("handoff:stop"),
+                type: "run_interrupt_request",
+                threadId,
+                runId: source.id,
+                nodeId: source.rootNodeId,
+                providerThreadId: null,
+                providerTurnId: null,
+                nativeItemRef: null,
+                parentItemId: null,
+                ordinal: 3,
+                status: "completed",
+                title: null,
+                startedAt: now,
+                completedAt: now,
+                updatedAt: now,
+                message: "User stopped work.",
+              },
+            },
+          ],
+        });
+      if (scenario === "new-run")
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make("handoff:new-run"),
+          threadId,
+          messageId: MessageId.make("handoff:new-run"),
+          text: "Different work.",
+          attachments: [],
+          dispatchMode: { type: "defer_start" },
+          createdBy: "user",
+          creationSource: "web",
+        });
+      if (scenario === "pending-request") {
+        yield* events.write({
+          events: [
+            {
+              id: EventId.make("handoff:pending-request"),
+              type: "runtime-request.updated",
+              threadId,
+              nodeId: source.rootNodeId!,
+              occurredAt: now,
+              payload: {
+                id: RuntimeRequestId.make("handoff:pending-request"),
+                nodeId: source.rootNodeId!,
+                providerTurnId: null,
+                nativeRequestRef: null,
+                kind: "user_input",
+                status: "pending",
+                responseCapability: { type: "message" },
+                createdAt: now,
+                resolvedAt: null,
+              },
+            },
+          ],
+        });
+        assert.notInclude(
+          (yield* store.getLimitRecoveryCandidates({
+            now,
+            autoResume: false,
+            snooze: false,
+            handoff: true,
+          })).map((candidate) => candidate.id),
+          threadId,
+        );
+      }
+      const before = yield* orchestrator.getThreadProjection(threadId);
+      const command = {
+        type: "message.dispatch" as const,
+        commandId: CommandId.make(`handoff:continue:${scenario}`),
+        threadId,
+        messageId: MessageId.make(`handoff:continue:${scenario}`),
+        usageLimitHandoffOfRunId: source.id,
+        modelSelection: target,
+        text: "Continue where you left off.",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" as const },
+        createdBy: "user" as const,
+        creationSource: "server" as const,
+      };
+      yield* orchestrator.dispatch(command);
+      yield* orchestrator.dispatch(command);
+      const after = yield* orchestrator.getThreadProjection(threadId);
+      assert.lengthOf(after.runs, before.runs.length + (scenario === "handoff" ? 1 : 0));
+      assert.equal(after.thread.runtimeMode, "approval-required");
+      assert.equal(after.thread.worktreePath, before.thread.worktreePath);
+      if (scenario === "handoff") {
+        assert.equal(after.thread.providerInstanceId, alternateInstanceId);
+        assert.isNotNull(after.runs.at(-1)!.contextHandoffId);
+        assert.include(
+          after.contextHandoffs
+            .at(-1)!
+            .history?.messages.map((message) => message.text)
+            .join("\n") ?? "",
+          "Complete the original task",
+        );
+        yield* orchestrator.dispatch({
+          ...command,
+          commandId: CommandId.make("handoff:another-delivery"),
+          messageId: MessageId.make("handoff:another-delivery"),
+        });
+        assert.lengthOf(
+          (yield* orchestrator.getThreadProjection(threadId)).runs,
+          after.runs.length,
+        );
+      }
+      yield* settings.updateSettings({ usageLimitHandoffOrder: [] });
+    }),
+  );
+
   it.effect.each(["interrupted", "usage_limit"] as const)(
     "manually resumes an %s run ahead of its queued message only once",
     (reason) =>
