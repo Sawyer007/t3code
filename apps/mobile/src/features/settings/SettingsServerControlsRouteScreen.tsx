@@ -44,6 +44,7 @@ import {
   type ScopedMobileSettingsTarget,
 } from "./settings-scoped-server";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
+import { AutoHandoffSettingsSection } from "./components/AutoHandoffSettingsSection";
 import { AutoSettleSettingsRows } from "./ThreadSettingsSections";
 import { supportsSharedSettingsSync } from "@t3tools/client-runtime/state/shared-settings";
 
@@ -402,6 +403,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     />
                   </SettingsSection>
                   <AutoSettleSettingsRows write={write} pending={pendingWrites > 0} />
+                  <AutoHandoffSettingsSection />
                 </>
               ) : null}
 

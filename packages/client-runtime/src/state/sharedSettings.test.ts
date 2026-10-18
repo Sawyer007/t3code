@@ -5,7 +5,19 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
-import { filterSharedServerPatch } from "./sharedSettings.ts";
+import { filterSharedServerPatch, splitSharedServerPatch } from "./sharedSettings.ts";
+
+describe("splitSharedServerPatch", () => {
+  it("keeps provider handoff policy local to its environment", () => {
+    const patch = {
+      autoHandoffLimitedThreads: true,
+      usageLimitHandoffOrder: [
+        { instanceId: ProviderInstanceId.make("local_account"), model: "model" },
+      ],
+    };
+    expect(splitSharedServerPatch(patch)).toEqual({ sharedPatch: {}, localPatch: patch });
+  });
+});
 
 describe("filterSharedServerPatch", () => {
   it("holds the restart preference until the target's config loads", () => {

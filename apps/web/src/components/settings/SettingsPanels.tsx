@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { AutoHandoffSettings } from "./AutoHandoffSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { CheckIcon } from "lucide-react";
@@ -496,6 +497,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
       ? ["Resume after usage limits"]
       : []),
+    ...(settings.autoHandoffLimitedThreads || settings.usageLimitHandoffOrder.length > 0
+      ? ["Automatic provider handoff"]
+      : []),
     ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
       ? ["Snooze until limits reset"]
       : []),
@@ -653,6 +657,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleKeepPullRequests: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
+      autoHandoffLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoHandoffLimitedThreads,
+      usageLimitHandoffOrder: DEFAULT_UNIFIED_SETTINGS.usageLimitHandoffOrder,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       snoozePresets: DEFAULT_UNIFIED_SETTINGS.snoozePresets,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
@@ -1628,6 +1634,7 @@ export function ThreadsSettingsPanel() {
             />
           }
         />
+        <AutoHandoffSettings />
       </SettingsSection>
 
       {hasServerTargets ? (

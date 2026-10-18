@@ -6,6 +6,7 @@ import type {
   ProviderInstanceId,
   ServerProvider,
   ServerProviderModel,
+  ServerSettingsPatch,
 } from "@t3tools/contracts";
 import {
   getModelSelectionStringOptionValue,
@@ -15,6 +16,45 @@ import {
 import { isReasoningSelect } from "./modelTraits.ts";
 import type { ThreadStructure } from "./state/models.ts";
 import { REASONING_EFFORT_OPTION_IDS } from "./state/threadExecution.ts";
+
+export function editUsageLimitHandoffOrder(
+  order: ReadonlyArray<ModelSelection>,
+  action:
+    | { readonly type: "select"; readonly index: number; readonly selection: ModelSelection }
+    | { readonly type: "move"; readonly index: number; readonly offset: -1 | 1 }
+    | { readonly type: "remove"; readonly index: number },
+): ReadonlyArray<ModelSelection> {
+  if (action.index < 0 || action.index > order.length) return order;
+  if (action.type === "select") {
+    if (
+      action.index >= 16 ||
+      order.some(
+        (entry, index) =>
+          index !== action.index && entry.instanceId === action.selection.instanceId,
+      )
+    )
+      return order;
+    const next = [...order];
+    next[action.index] = action.selection;
+    return next;
+  }
+  if (action.index >= order.length) return order;
+  if (action.type === "remove") return order.filter((_, index) => index !== action.index);
+  const destination = action.index + action.offset;
+  if (destination < 0 || destination >= order.length) return order;
+  const next = [...order];
+  [next[action.index], next[destination]] = [next[destination]!, next[action.index]!];
+  return next;
+}
+
+export function usageLimitHandoffOrderPatch(
+  order: ReadonlyArray<ModelSelection>,
+): ServerSettingsPatch {
+  return {
+    usageLimitHandoffOrder: order,
+    ...(order.length < 2 ? { autoHandoffLimitedThreads: false } : {}),
+  };
+}
 
 export type HandoffTimelineRun = Pick<
   OrchestrationV2Run,
