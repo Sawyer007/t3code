@@ -40,6 +40,33 @@ const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const encodeServerSettingsPatch = Schema.encodeSync(ServerSettingsPatch);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
+describe("usage-limit handoff settings", () => {
+  it("defaults off and preserves an ordered fallback list", () => {
+    expect(decodeServerSettings({}).usageLimitHandoffOrder).toEqual([]);
+    const order = [
+      { instanceId: "codex", model: "gpt-5.4" },
+      { instanceId: "claude", model: "sonnet" },
+    ];
+    expect(
+      decodeServerSettingsPatch({ usageLimitHandoffOrder: order }).usageLimitHandoffOrder,
+    ).toEqual(order);
+    expect(
+      decodeServerSettingsPatch({ usageLimitHandoffOrder: [] }).usageLimitHandoffOrder,
+    ).toEqual([]);
+  });
+
+  it("rejects repeating an account with another model", () => {
+    expect(() =>
+      decodeServerSettingsPatch({
+        usageLimitHandoffOrder: [
+          { instanceId: "codex", model: "first" },
+          { instanceId: "codex", model: "second" },
+        ],
+      }),
+    ).toThrow();
+  });
+});
+
 describe("storage cleanup settings", () => {
   it("keeps cleanup disabled for existing installations", () => {
     expect(decodeServerSettings({}).worktreeCleanup).toBeNull();
