@@ -119,13 +119,16 @@ const makeSweep = Effect.gen(function* () {
       now,
       autoResume: preferences.autoResumeLimitedThreads,
       snooze: preferences.snoozeLimitedThreads,
-      handoff: preferences.usageLimitHandoffOrder.length > 1,
+      handoff:
+        preferences.autoHandoffLimitedThreads && preferences.usageLimitHandoffOrder.length > 1,
     });
     const available = yield* providers.getProviders;
     let acted = false;
     let awaitingHandoff = false;
     for (const thread of candidates) {
-      const order = preferences.usageLimitHandoffOrder.filter((selection) =>
+      const order = (
+        preferences.autoHandoffLimitedThreads ? preferences.usageLimitHandoffOrder : []
+      ).filter((selection) =>
         resolveProjectProviderInstanceEnabled(preferences, thread.projectId, selection.instanceId),
       );
       const target =

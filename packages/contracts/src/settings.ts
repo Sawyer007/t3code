@@ -1271,6 +1271,7 @@ export const ServerSettings = Schema.Struct({
    */
   linkedEnvironmentsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 
+  autoHandoffLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   usageLimitHandoffOrder: UsageLimitHandoffOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
@@ -1626,6 +1627,7 @@ export const ServerSettingsPatch = Schema.Struct({
   sidebarAutoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
+  autoHandoffLimitedThreads: Schema.optionalKey(Schema.Boolean),
   usageLimitHandoffOrder: Schema.optionalKey(UsageLimitHandoffOrder),
   snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozePresets: Schema.optionalKey(SnoozePresetSettings),
