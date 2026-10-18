@@ -43,6 +43,20 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 ];
 
 describe("searchSettings", () => {
+  it.each(["handoff", "fallback", "predaja"])(
+    "finds automatic provider handoff for %s",
+    (query) => {
+      expect(searchSettings(query)).toContainEqual(
+        expect.objectContaining({
+          id: "auto-handoff-limited-threads",
+          to: "/settings/general",
+          targetId: "auto-handoff-limited-threads",
+          scope: "environment",
+        }),
+      );
+    },
+  );
+
   it("matches titles, sections, and remembered setting details", () => {
     expect(searchSettings("word", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     expect(searchSettings("network", ITEMS).map((item) => item.id)).toEqual(["network-access"]);

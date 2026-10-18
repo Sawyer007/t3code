@@ -39,11 +39,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
     & $vp test run apps/server/src/orchestration-v2/usageLimitHandoff.test.ts apps/server/src/orchestration-v2/runtimeLayer.test.ts apps/server/src/orchestration-v2/ProjectionStore.test.ts apps/server/src/scheduling/Scheduler.integration.test.ts packages/contracts/src/settings.test.ts -t 'automatic usage-limit|usage-limit recovery|usage-limit handoff settings|projects only the latest failed root|runs Scheduled Tasks'
     if ($LASTEXITCODE -ne 0) { throw 'Automatic handoff checks failed.' }
-    foreach ($project in @('packages/contracts', 'apps/server')) {
+    & $vp test run packages/client-runtime/src/handoff.test.ts packages/client-runtime/src/state/sharedSettings.test.ts apps/web/src/components/settings/settingsSearch.test.ts
+    if ($LASTEXITCODE -ne 0) { throw 'Handoff settings checks failed.' }
+    foreach ($project in @('packages/contracts', 'packages/client-runtime', 'apps/server', 'apps/web', 'apps/mobile')) {
         & (Join-Path $patchCheckout 'node_modules/.bin/tsc-rs.cmd') --noEmit -p "$project/tsconfig.json"
         if ($LASTEXITCODE -ne 0) { throw "Typecheck failed for $project." }
     }
-    $changedSources = @(Invoke-PatchGit $patchCheckout @('diff', '--name-only', 'main...HEAD', '--', '*.ts'))
+    $changedSources = @(Invoke-PatchGit $patchCheckout @('diff', '--name-only', 'main...HEAD', '--', '*.ts', '*.tsx'))
     if ($changedSources.Count -gt 0) {
         & $vp lint @changedSources
         if ($LASTEXITCODE -ne 0) { throw 'Lint failed for the patch.' }

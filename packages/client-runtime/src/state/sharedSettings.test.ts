@@ -10,12 +10,25 @@ import {
   filterSharedServerPatch,
   findSharedSettingsMismatches,
   pickSharedServerSettings,
+  splitSharedServerPatch,
 } from "./sharedSettings.ts";
 
 const primaryId = EnvironmentId.make("env-primary");
 const laptopId = EnvironmentId.make("env-laptop");
 const boxId = EnvironmentId.make("env-box");
 const restartCapabilities = { threadRestartContinuation: true };
+
+describe("splitSharedServerPatch", () => {
+  it("keeps provider handoff policy local to its environment", () => {
+    const patch = {
+      autoHandoffLimitedThreads: true,
+      usageLimitHandoffOrder: [
+        { instanceId: ProviderInstanceId.make("local_account"), model: "model" },
+      ],
+    };
+    expect(splitSharedServerPatch(patch)).toEqual({ sharedPatch: {}, localPatch: patch });
+  });
+});
 
 describe("filterSharedServerPatch", () => {
   it.each([true, false])(

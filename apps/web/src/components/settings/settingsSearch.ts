@@ -323,6 +323,16 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["usage quota rate limit reset recover continue"],
   },
   {
+    id: "auto-handoff-limited-threads",
+    title: "Automatic provider handoff",
+    to: "/settings/general",
+    targetId: "auto-handoff-limited-threads",
+    searchTerms: [
+      "usage quota rate limit fallback handoff provider account model order automatic predaja",
+    ],
+    scope: "environment",
+  },
+  {
     id: "working-shelf",
     title: "Working section (beta)",
     to: "/settings/general",

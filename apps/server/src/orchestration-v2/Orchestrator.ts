@@ -4800,6 +4800,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const now = yield* DateTime.now;
       if (
         source?.id !== command.usageLimitHandoffOfRunId ||
+        !settings.autoHandoffLimitedThreads ||
         threadShellFromProjection(projection).lastErrorClass !== "usage_limit" ||
         sourceIndex < 0 ||
         command.modelSelection === undefined ||

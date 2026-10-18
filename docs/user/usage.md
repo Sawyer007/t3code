@@ -131,14 +131,22 @@ using a proxy through `ANTHROPIC_AUTH_TOKEN`.
 
 ## Automatic provider handoff
 
-The local automatic handoff extension continues a conversation with another configured provider
+The automatic handoff extension continues a conversation with another configured provider
 when the current provider reports a usage limit. It runs on the server, so the client can disconnect
 while the server machine stays awake. It does not require another request to the exhausted provider.
 
-Add an ordered list to the environment's `settings.json` (`userdata/settings.json` below T3 home):
+On web or desktop, open **Settings → General → Automatic provider handoff**. On mobile, open
+**Settings → Thread behavior → Automatic provider handoff**. Select one environment, add provider
+accounts, choose their models, and arrange the fallback order. Choose **Save order**, then turn on
+**Automatic provider handoff**. At least two saved accounts are needed. Switching off keeps the
+saved list; removing accounts until fewer than two remain also switches it off.
+
+You can also merge these fields into the environment's `settings.json` (`userdata/settings.json`
+below T3 home):
 
 ```json
 {
+  "autoHandoffLimitedThreads": true,
   "usageLimitHandoffOrder": [
     { "instanceId": "codex", "model": "your-codex-model" },
     { "instanceId": "claudeAgent", "model": "your-claude-model" },
@@ -150,8 +158,8 @@ Add an ordered list to the environment's `settings.json` (`userdata/settings.jso
 
 Merge these fields into the existing settings; replace the example model names and instance IDs
 with those configured in this environment. Each instance may appear once. Only conversations whose
-current instance appears in the list participate. The default empty list disables automatic handoff;
-set `usageLimitHandoffOrder` to `[]` to turn it off again.
+current instance appears in the list participate. Automatic handoff is off by default. Set
+`autoHandoffLimitedThreads` to `false` to turn it off while keeping the order.
 
 Handoffs move forward through the list, skipping unavailable, project-disabled, or known exhausted
 targets. Models on the same account can share the same limit; configure independently authenticated

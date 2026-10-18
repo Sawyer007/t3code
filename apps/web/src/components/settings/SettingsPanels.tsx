@@ -1,4 +1,5 @@
 import { SettingsGroup } from "./SettingsGroup";
+import { AutoHandoffSettings } from "./AutoHandoffSettings";
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
 import { Spinner } from "~/components/ui/spinner";
@@ -587,6 +588,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
       ? ["Auto-resume limited threads"]
       : []),
+    ...(settings.autoHandoffLimitedThreads || settings.usageLimitHandoffOrder.length > 0
+      ? ["Automatic provider handoff"]
+      : []),
     ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
       ? ["Snooze limited threads"]
       : []),
@@ -747,6 +751,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleKeepPullRequests: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
+      autoHandoffLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoHandoffLimitedThreads,
+      usageLimitHandoffOrder: DEFAULT_UNIFIED_SETTINGS.usageLimitHandoffOrder,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
@@ -2275,6 +2281,8 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        <AutoHandoffSettings />
 
         <SettingsRow
           {...searchableSetting("working-shelf")}

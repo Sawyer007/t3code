@@ -3,13 +3,65 @@ import {
   RunId,
   type OrchestrationV2ThreadProjection,
   type ServerProvider,
+  type ModelSelection,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   resolveHandoffEndpoints,
   resolvePendingHandoff,
   type HandoffTimelineRun,
+  editUsageLimitHandoffOrder,
+  usageLimitHandoffOrderPatch,
 } from "./handoff.ts";
+
+describe("automatic handoff order editing shared by clients", () => {
+  const order: ReadonlyArray<ModelSelection> = [
+    {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "first",
+      options: [{ id: "effort", value: "high" }],
+    },
+    { instanceId: ProviderInstanceId.make("claudeAgent"), model: "second" },
+  ];
+  it("preserves account model options while reordering without changing the saved list", () => {
+    const moved = editUsageLimitHandoffOrder(order, { type: "move", index: 1, offset: -1 });
+    expect(moved).toEqual([order[1], order[0]]);
+    expect(order[0]?.model).toBe("first");
+    expect(editUsageLimitHandoffOrder(order, { type: "move", index: 0, offset: -1 })).toBe(order);
+    expect(editUsageLimitHandoffOrder(order, { type: "move", index: 1, offset: 1 })).toBe(order);
+  });
+  it("prevents duplicate accounts and limits the list to sixteen entries", () => {
+    expect(
+      editUsageLimitHandoffOrder(order, {
+        type: "select",
+        index: 1,
+        selection: { ...order[0]!, model: "another-model" },
+      }),
+    ).toBe(order);
+    const full = Array.from({ length: 16 }, (_, index) => ({
+      instanceId: ProviderInstanceId.make(`account${index}`),
+      model: "model",
+    }));
+    expect(
+      editUsageLimitHandoffOrder(full, { type: "select", index: 16, selection: order[0]! }),
+    ).toBe(full);
+  });
+  it("can append a new account and disables handoff if fewer than two remain", () => {
+    expect(
+      editUsageLimitHandoffOrder(order.slice(0, 1), {
+        type: "select",
+        index: 1,
+        selection: order[1]!,
+      }),
+    ).toEqual(order);
+    const reduced = editUsageLimitHandoffOrder(order, { type: "remove", index: 1 });
+    expect(usageLimitHandoffOrderPatch(reduced)).toEqual({
+      usageLimitHandoffOrder: [order[0]],
+      autoHandoffLimitedThreads: false,
+    });
+    expect(usageLimitHandoffOrderPatch(order)).toEqual({ usageLimitHandoffOrder: order });
+  });
+});
 
 const from = ProviderInstanceId.make("codex_personal");
 const to = ProviderInstanceId.make("claudeAgent");

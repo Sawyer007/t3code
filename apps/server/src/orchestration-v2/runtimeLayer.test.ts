@@ -5490,7 +5490,10 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
       const projectId = ProjectId.make(`handoff:project:${scenario}`);
       const target = { ...modelSelection, instanceId: alternateInstanceId };
       const now = yield* DateTime.now;
-      yield* settings.updateSettings({ usageLimitHandoffOrder: [modelSelection, target] });
+      yield* settings.updateSettings({
+        autoHandoffLimitedThreads: true,
+        usageLimitHandoffOrder: [modelSelection, target],
+      });
       yield* seedProject({
         projectId,
         title: "Handoff test",
@@ -5580,7 +5583,8 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
         ),
         threadId,
       );
-      if (scenario === "disabled") yield* settings.updateSettings({ usageLimitHandoffOrder: [] });
+      if (scenario === "disabled")
+        yield* settings.updateSettings({ autoHandoffLimitedThreads: false });
       if (scenario === "selection-changed")
         yield* orchestrator.dispatch({
           type: "thread.model-selection.set",
@@ -5721,7 +5725,10 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
           after.runs.length,
         );
       }
-      yield* settings.updateSettings({ usageLimitHandoffOrder: [] });
+      yield* settings.updateSettings({
+        autoHandoffLimitedThreads: false,
+        usageLimitHandoffOrder: [],
+      });
     }),
   );
 

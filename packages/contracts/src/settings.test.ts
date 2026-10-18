@@ -26,6 +26,7 @@ const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 describe("usage-limit handoff settings", () => {
   it("defaults off and preserves an ordered fallback list", () => {
     expect(decodeServerSettings({}).usageLimitHandoffOrder).toEqual([]);
+    expect(decodeServerSettings({}).autoHandoffLimitedThreads).toBe(false);
     const order = [
       { instanceId: "codex", model: "gpt-5.4" },
       { instanceId: "claude", model: "sonnet" },
@@ -36,6 +37,16 @@ describe("usage-limit handoff settings", () => {
     expect(
       decodeServerSettingsPatch({ usageLimitHandoffOrder: [] }).usageLimitHandoffOrder,
     ).toEqual([]);
+    const settings = decodeServerSettings({
+      autoHandoffLimitedThreads: true,
+      usageLimitHandoffOrder: order,
+    });
+    const disabled = decodeServerSettings({
+      ...encodeServerSettings(settings),
+      ...decodeServerSettingsPatch({ autoHandoffLimitedThreads: false }),
+    });
+    expect(disabled.autoHandoffLimitedThreads).toBe(false);
+    expect(disabled.usageLimitHandoffOrder).toEqual(order);
   });
 
   it("rejects repeating an account with another model", () => {
