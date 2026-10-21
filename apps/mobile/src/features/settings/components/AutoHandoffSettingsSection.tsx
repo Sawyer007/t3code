@@ -7,12 +7,21 @@ import {
   usageLimitHandoffOrderPatch,
 } from "@t3tools/client-runtime/handoff";
 import * as Equal from "effect/Equal";
+import {
+  createModelSelection,
+  getProviderOptionCurrentLabel,
+  getProviderOptionCurrentValue,
+} from "@t3tools/shared/model";
 
 import { AppText as Text } from "../../../components/ui/AppText";
 import { Button } from "../../../components/ui/Button";
 import { IconButton } from "../../../components/ui/IconButton";
 import { Menu } from "../../../components/ui/Menu";
 import { buildModelOptions, groupByProvider, type ModelOption } from "../../../lib/modelOptions";
+import {
+  applyProviderOptionSelection,
+  resolveProviderOptionDescriptors,
+} from "../../../lib/providerOptions";
 import { useEnvironmentServerConfig } from "../../../state/entities";
 import { readEnvironmentScope, useEnvironmentsWithScope } from "../../../state/session";
 import { serverEnvironment } from "../../../state/server";
@@ -133,6 +142,24 @@ function HandoffOrderEditor(props: {
               );
             }}
           />
+          <ModelOptionsMenu
+            selection={selection}
+            model={models.find(
+              (model) =>
+                model.selection.instanceId === selection.instanceId &&
+                model.selection.model === selection.model,
+            )}
+            disabled={props.disabled}
+            onSelect={(nextSelection) =>
+              setDraft((current) =>
+                editUsageLimitHandoffOrder(current, {
+                  type: "select",
+                  index,
+                  selection: nextSelection,
+                }),
+              )
+            }
+          />
           <View className="flex-row items-center gap-1">
             <IconButton
               icon="arrow.up"
@@ -197,6 +224,75 @@ function HandoffOrderEditor(props: {
         />
       ) : null}
     </View>
+  );
+}
+
+function ModelOptionsMenu(props: {
+  readonly selection: ModelSelection;
+  readonly model: ModelOption | undefined;
+  readonly disabled: boolean;
+  readonly onSelect: (selection: ModelSelection) => void;
+}) {
+  const descriptors = resolveProviderOptionDescriptors({
+    capabilities: props.model?.capabilities,
+    selections: props.selection.options,
+  });
+  const options = descriptors.flatMap((descriptor) => {
+    const choices =
+      descriptor.type === "boolean"
+        ? [
+            { id: "true", label: "On", value: true },
+            { id: "false", label: "Off", value: false },
+          ]
+        : descriptor.options
+            .filter((option) => !descriptor.promptInjectedValues?.includes(option.id))
+            .map((option) => ({ ...option, value: option.id }));
+    return choices.length > 0 ? [{ descriptor, choices }] : [];
+  });
+  if (options.length === 0) return null;
+  const label = options
+    .map(
+      ({ descriptor }) =>
+        `${descriptor.label}: ${getProviderOptionCurrentLabel(descriptor, props.selection) ?? "Default"}`,
+    )
+    .join(" · ");
+  const button = <Button label={label} disabled={props.disabled} onPress={() => {}} />;
+  if (props.disabled) return button;
+  return (
+    <Menu
+      title="Handoff model options"
+      actions={options.map(({ descriptor, choices }) => ({
+        id: descriptor.id,
+        title: descriptor.label,
+        subactions: choices.map((choice) => ({
+          id: JSON.stringify([descriptor.id, choice.value]),
+          title: choice.label,
+          state:
+            getProviderOptionCurrentValue(descriptor, props.selection) === choice.value
+              ? ("on" as const)
+              : ("off" as const),
+        })),
+      }))}
+      onPressAction={({ nativeEvent }) => {
+        for (const { descriptor, choices } of options) {
+          const choice = choices.find(
+            (choice) => JSON.stringify([descriptor.id, choice.value]) === nativeEvent.event,
+          );
+          if (!choice) continue;
+          const selections = applyProviderOptionSelection(descriptors, {
+            id: descriptor.id,
+            value: choice.value,
+          });
+          if (selections)
+            props.onSelect(
+              createModelSelection(props.selection.instanceId, props.selection.model, selections),
+            );
+          return;
+        }
+      }}
+    >
+      {button}
+    </Menu>
   );
 }
 
