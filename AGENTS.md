@@ -1,5 +1,22 @@
 # T3 Code
 
+> **This checkout is a personal fork carrying one local patch.** `main` mirrors upstream
+> [pingdotgg/t3code](https://github.com/pingdotgg/t3code) and never gets fork commits. The only custom
+> work is automatic provider handoff: when a provider reports a usage limit, the server moves the
+> thread to the next configured provider so work continues while nobody is at the computer. It lives
+> on the `local/auto-handoff` branch, checked out in `C:\Users\Sawyer\.t3\worktrees\t3code\local-auto-handoff`.
+>
+> - Make patch changes on `local/auto-handoff` only, and keep the patch small so it rebases cleanly.
+> - Update from upstream with `scripts/update-auto-handoff.ps1`; both checkouts must be clean first. See
+>   [Maintaining the local automatic handoff patch](docs/operations/development.md#maintaining-the-local-automatic-handoff-patch).
+> - Behavior: [Automatic provider handoff](docs/user/usage.md#automatic-provider-handoff). Core logic:
+>   `apps/server/src/orchestration-v2/usageLimitHandoff.ts` and `UsageLimitRecoveryWorker.ts`.
+> - Handoff only moves forward through the configured order, never back to earlier entries. This is
+>   intentional; do not add cycling.
+> - Work notes stay outside the repo in `D:\t3code-work-notes`. The patched app runs from this
+>   worktree's build on `127.0.0.1:16658`; do not stop it.
+> - Push to `origin` (the fork) only when asked. After a rebase the branch needs `--force-with-lease`.
+
 T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients.
 
 You can think of T3 Code as an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor.
