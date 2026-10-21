@@ -11,6 +11,7 @@ import {
   usageLimitHandoffOrderPatch,
 } from "@t3tools/client-runtime/handoff";
 import * as Equal from "effect/Equal";
+import { createModelSelection } from "@t3tools/shared/model";
 
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
 import {
@@ -23,6 +24,7 @@ import { useEnvironmentProviders } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { TraitsPicker } from "../chat/TraitsPicker";
 import type { ModelEsque } from "../chat/providerIconUtils";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
@@ -130,96 +132,124 @@ function HandoffOrderEditor(props: {
         order; accounts can share quota.
       </p>
       <ol className="space-y-2">
-        {draft.map((selection, index) => (
-          <li key={selection.instanceId} className="flex flex-wrap items-center gap-2">
-            <span className="min-w-0 text-sm">
-              {index + 1}.{" "}
-              {props.entries.find((entry) => entry.instanceId === selection.instanceId)
-                ?.displayName ?? selection.instanceId}
-            </span>
-            <ProviderModelPicker
-              environmentId={props.environmentId}
-              activeInstanceId={selection.instanceId}
-              model={selection.model}
-              lockedProvider={null}
-              instanceEntries={props.entries}
-              modelOptionsByInstance={props.models}
-              disabled={props.disabled}
-              triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-              triggerAriaLabel={`Handoff provider and model ${index + 1}`}
-              triggerLabel={
-                props.entries
-                  .find((entry) => entry.instanceId === selection.instanceId)
-                  ?.models.find((model) => model.slug === selection.model)?.name ?? selection.model
-              }
-              getModelDisabledReason={(instanceId, model) => {
-                if (draft.some((entry, row) => row !== index && entry.instanceId === instanceId))
-                  return "This provider account is already in the order.";
-                const entry = props.entries.find(
-                  (candidate) => candidate.instanceId === instanceId,
-                );
-                return entry?.enabled &&
-                  entry.isAvailable &&
-                  props.models
-                    .get(instanceId)
-                    ?.some((option) => option.slug === model && !option.isUnavailable)
-                  ? null
-                  : "This model is unavailable.";
-              }}
-              onInstanceModelChange={(instanceId, model) => {
-                if (instanceId === selection.instanceId && model === selection.model) return;
-                setDraft((current) =>
-                  editUsageLimitHandoffOrder(current, {
-                    type: "select",
-                    index,
-                    selection: { instanceId, model },
-                  }),
-                );
-              }}
-            />
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label={`Move handoff provider ${index + 1} up`}
-                disabled={props.disabled || index === 0}
-                onClick={() =>
-                  setDraft((current) =>
-                    editUsageLimitHandoffOrder(current, { type: "move", index, offset: -1 }),
-                  )
-                }
-              >
-                <ArrowUpIcon />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label={`Move handoff provider ${index + 1} down`}
-                disabled={props.disabled || index === draft.length - 1}
-                onClick={() =>
-                  setDraft((current) =>
-                    editUsageLimitHandoffOrder(current, { type: "move", index, offset: 1 }),
-                  )
-                }
-              >
-                <ArrowDownIcon />
-              </Button>
-              <Button
-                variant="ghost-destructive"
-                size="icon-xs"
-                aria-label={`Remove handoff provider ${index + 1}`}
+        {draft.map((selection, index) => {
+          const entry = props.entries.find((entry) => entry.instanceId === selection.instanceId);
+          return (
+            <li key={selection.instanceId} className="flex flex-wrap items-center gap-2">
+              <span className="min-w-0 text-sm">
+                {index + 1}. {entry?.displayName ?? selection.instanceId}
+              </span>
+              <ProviderModelPicker
+                environmentId={props.environmentId}
+                activeInstanceId={selection.instanceId}
+                model={selection.model}
+                lockedProvider={null}
+                instanceEntries={props.entries}
+                modelOptionsByInstance={props.models}
                 disabled={props.disabled}
-                onClick={() =>
-                  setDraft((current) =>
-                    editUsageLimitHandoffOrder(current, { type: "remove", index }),
-                  )
+                triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                triggerAriaLabel={`Handoff provider and model ${index + 1}`}
+                triggerLabel={
+                  entry?.models.find((model) => model.slug === selection.model)?.name ??
+                  selection.model
                 }
-              >
-                <Trash2Icon />
-              </Button>
-            </div>
-          </li>
-        ))}
+                getModelDisabledReason={(instanceId, model) => {
+                  if (draft.some((entry, row) => row !== index && entry.instanceId === instanceId))
+                    return "This provider account is already in the order.";
+                  const entry = props.entries.find(
+                    (candidate) => candidate.instanceId === instanceId,
+                  );
+                  return entry?.enabled &&
+                    entry.isAvailable &&
+                    props.models
+                      .get(instanceId)
+                      ?.some((option) => option.slug === model && !option.isUnavailable)
+                    ? null
+                    : "This model is unavailable.";
+                }}
+                onInstanceModelChange={(instanceId, model) => {
+                  if (instanceId === selection.instanceId && model === selection.model) return;
+                  setDraft((current) =>
+                    editUsageLimitHandoffOrder(current, {
+                      type: "select",
+                      index,
+                      selection: { instanceId, model },
+                    }),
+                  );
+                }}
+              />
+              {entry ? (
+                <TraitsPicker
+                  provider={entry.driverKind}
+                  instanceId={selection.instanceId}
+                  models={entry.models}
+                  model={selection.model}
+                  prompt=""
+                  onPromptChange={() => {}}
+                  modelOptions={selection.options}
+                  allowPromptInjectedEffort={false}
+                  planModeEnabled={props.settings.planModeEnabled}
+                  disabled={props.disabled}
+                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                  onModelOptionsChange={(options) =>
+                    setDraft((current) =>
+                      editUsageLimitHandoffOrder(current, {
+                        type: "select",
+                        index,
+                        selection: createModelSelection(
+                          selection.instanceId,
+                          selection.model,
+                          options,
+                        ),
+                      }),
+                    )
+                  }
+                />
+              ) : null}
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Move handoff provider ${index + 1} up`}
+                  disabled={props.disabled || index === 0}
+                  onClick={() =>
+                    setDraft((current) =>
+                      editUsageLimitHandoffOrder(current, { type: "move", index, offset: -1 }),
+                    )
+                  }
+                >
+                  <ArrowUpIcon />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Move handoff provider ${index + 1} down`}
+                  disabled={props.disabled || index === draft.length - 1}
+                  onClick={() =>
+                    setDraft((current) =>
+                      editUsageLimitHandoffOrder(current, { type: "move", index, offset: 1 }),
+                    )
+                  }
+                >
+                  <ArrowDownIcon />
+                </Button>
+                <Button
+                  variant="ghost-destructive"
+                  size="icon-xs"
+                  aria-label={`Remove handoff provider ${index + 1}`}
+                  disabled={props.disabled}
+                  onClick={() =>
+                    setDraft((current) =>
+                      editUsageLimitHandoffOrder(current, { type: "remove", index }),
+                    )
+                  }
+                >
+                  <Trash2Icon />
+                </Button>
+              </div>
+            </li>
+          );
+        })}
       </ol>
       <div className="flex flex-wrap items-center gap-2">
         <Button

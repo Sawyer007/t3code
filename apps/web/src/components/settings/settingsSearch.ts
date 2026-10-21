@@ -328,7 +328,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
     targetId: "auto-handoff-limited-threads",
     searchTerms: [
-      "usage quota rate limit fallback handoff provider account model order automatic predaja",
+      "usage quota rate limit fallback handoff provider account model order reasoning effort thinking automatic predaja",
     ],
     scope: "environment",
   },
