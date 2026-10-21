@@ -13,8 +13,10 @@
 >   `apps/server/src/orchestration-v2/usageLimitHandoff.ts` and `UsageLimitRecoveryWorker.ts`.
 > - Handoff only moves forward through the configured order, never back to earlier entries. This is
 >   intentional; do not add cycling.
+> - After a handoff, composers follow the new model through upstream's draft reconciliation (#20886).
+>   The patch has no client-side model sync of its own; check that path before adding one.
 > - Work notes stay outside the repo in `D:\t3code-work-notes`. The patched app runs from this
->   worktree's build on `127.0.0.1:16658`; do not stop it.
+>   worktree's build on `127.0.0.1:16658`; stop it only to update it, at the user's request.
 > - Push to `origin` (the fork) only when asked. After a rebase the branch needs `--force-with-lease`.
 
 T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients.
