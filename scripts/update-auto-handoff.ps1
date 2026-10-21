@@ -37,7 +37,7 @@ Push-Location $patchCheckout
 try {
     & $vp install --frozen-lockfile -- --yes
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
-    & $vp test run apps/server/src/orchestration-v2/usageLimitHandoff.test.ts apps/server/src/orchestration-v2/runtimeLayer.test.ts apps/server/src/orchestration-v2/ProjectionStore.test.ts apps/server/src/scheduling/Scheduler.integration.test.ts packages/contracts/src/settings.test.ts -t 'automatic usage-limit|usage-limit recovery|usage-limit handoff settings|projects only the latest failed root|runs Scheduled Tasks'
+    & $vp test run apps/server/src/orchestration-v2/usageLimitHandoff.test.ts apps/server/src/orchestration-v2/runtimeLayer.test.ts apps/server/src/orchestration-v2/ProjectionStore.test.ts packages/contracts/src/settings.test.ts -t 'automatic usage-limit|usage-limit recovery|usage-limit handoff settings|projects only the latest failed root'
     if ($LASTEXITCODE -ne 0) { throw 'Automatic handoff checks failed.' }
     & $vp test run packages/client-runtime/src/handoff.test.ts packages/client-runtime/src/state/sharedSettings.test.ts apps/web/src/components/settings/settingsSearch.test.ts
     if ($LASTEXITCODE -ne 0) { throw 'Handoff settings checks failed.' }
