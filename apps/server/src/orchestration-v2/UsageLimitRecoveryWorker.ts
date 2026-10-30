@@ -131,16 +131,22 @@ const makeSweep = Effect.gen(function* () {
       ).filter((selection) =>
         resolveProjectProviderInstanceEnabled(preferences, thread.projectId, selection.instanceId),
       );
-      const target =
-        thread.snoozedUntil != null && DateTime.toEpochMillis(thread.snoozedUntil) > nowMs
-          ? undefined
-          : nextUsageLimitHandoff({
-              order,
-              current: thread.modelSelection,
-              providers: available,
-              runtimeMode: thread.runtimeMode,
-              nowMs,
-            });
+      const canHandoff =
+        order.length > 1 &&
+        order.some((selection) => selection.instanceId === thread.modelSelection.instanceId) &&
+        !(thread.snoozedUntil != null && DateTime.toEpochMillis(thread.snoozedUntil) > nowMs);
+      const target = canHandoff
+        ? nextUsageLimitHandoff({
+            order,
+            current: thread.modelSelection,
+            providers: available,
+            runtimeMode: thread.runtimeMode,
+            nowMs,
+            history: yield* projections.getThreadRecords(thread.id, ["runs", "turnItems"], {
+              turnItemTypes: ["error"],
+            }),
+          })
+        : undefined;
       const identity = `limit-handoff:${thread.id}:${thread.latestRunId}`;
       const command: OrchestrationV2Command | null =
         target === undefined

@@ -1,4 +1,12 @@
-import type { ModelSelection, RuntimeMode, ServerProvider } from "@t3tools/contracts";
+import type {
+  ModelSelection,
+  OrchestrationV2Run,
+  OrchestrationV2ThreadProjection,
+  RuntimeMode,
+  ServerProvider,
+} from "@t3tools/contracts";
+import { latestRootProviderFailure, runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
+import * as DateTime from "effect/DateTime";
 
 export function nextUsageLimitHandoff(input: {
   readonly order: ReadonlyArray<ModelSelection>;
@@ -6,19 +14,39 @@ export function nextUsageLimitHandoff(input: {
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly runtimeMode: RuntimeMode;
   readonly nowMs: number;
+  readonly history: Pick<OrchestrationV2ThreadProjection, "runs" | "turnItems">;
 }) {
   const index = input.order.findIndex(
     (selection) => selection.instanceId === input.current.instanceId,
   );
   if (index < 0) return undefined;
-  const source = input.providers.find(
-    (provider) => provider.instanceId === input.current.instanceId,
-  );
-  // Only move forward. Retrying earlier accounts without a new limit report can loop forever.
-  return input.order.slice(index + 1).find((selection) => {
-    const provider = input.providers.find(
-      (candidate) => candidate.instanceId === selection.instanceId,
-    );
+  const providers = new Map(input.providers.map((provider) => [provider.instanceId, provider]));
+  const source = providers.get(input.current.instanceId);
+  const accountKey = (instanceId: ModelSelection["instanceId"]) => {
+    const fingerprint = providers.get(instanceId)?.usageLimits?.credentialFingerprint;
+    return fingerprint ? `account:${fingerprint}` : `instance:${instanceId}`;
+  };
+  const latestRuns = new Map<string, OrchestrationV2Run>();
+  for (const run of input.history.runs) {
+    if (run.status === "queued" || (run.status === "cancelled" && run.startedAt === null)) continue;
+    const key = accountKey(run.providerInstanceId);
+    const previous = latestRuns.get(key);
+    if (previous === undefined || runRanAfter(run, previous)) latestRuns.set(key, run);
+  }
+  const previouslyLimited = (provider: ServerProvider) => {
+    const run = latestRuns.get(accountKey(provider.instanceId));
+    const failure = latestRootProviderFailure(run ?? null, input.history.turnItems);
+    if (!run || failure?.class !== "usage_limit") return false;
+    const reportedAt = DateTime.toEpochMillis(run.completedAt ?? run.requestedAt);
+    const resetMs = Date.parse(failure.resetAt ?? "");
+    if (resetMs > reportedAt && resetMs <= input.nowMs) return false;
+    // Limit snapshots can lag a terminal failure (including reports without resetAt).
+    // Only a newer allowance reading or the reported reset makes that account eligible again.
+    const limits = provider.usageLimits;
+    return !(limits && limits.windows.length > 0 && Date.parse(limits.checkedAt) > reportedAt);
+  };
+  return [...input.order.slice(index + 1), ...input.order.slice(0, index)].find((selection) => {
+    const provider = providers.get(selection.instanceId);
     return (
       provider !== undefined &&
       provider.enabled &&
@@ -39,7 +67,8 @@ export function nextUsageLimitHandoff(input: {
         (window) =>
           window.usedPercent >= 100 &&
           (!window.resetsAt || !(Date.parse(window.resetsAt) <= input.nowMs)),
-      )
+      ) &&
+      !previouslyLimited(provider)
     );
   });
 }

@@ -128,8 +128,8 @@ function HandoffOrderEditor(props: {
   return (
     <div className="space-y-3 py-3">
       <p className="text-xs text-muted-foreground">
-        Add and save at least two provider accounts to enable handoff. It moves forward through this
-        order; accounts can share quota.
+        Add and save at least two provider accounts to enable handoff. After the last account, it
+        starts from the top and skips unavailable or exhausted accounts. Accounts can share quota.
       </p>
       <ol className="space-y-2">
         {draft.map((selection, index) => {

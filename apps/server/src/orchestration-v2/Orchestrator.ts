@@ -5473,9 +5473,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         threadShellFromProjection(projection).lastErrorClass !== "usage_limit" ||
         sourceIndex < 0 ||
         command.modelSelection === undefined ||
-        !order
-          .slice(sourceIndex + 1)
-          .some((selection) => modelSelectionsEqual(selection, command.modelSelection!)) ||
+        command.modelSelection.instanceId === source.providerInstanceId ||
+        !order.some((selection) => modelSelectionsEqual(selection, command.modelSelection!)) ||
         !modelSelectionsEqual(projection.thread.modelSelection, source.modelSelection) ||
         command.dispatchMode.type !== "start_immediately" ||
         projection.thread.archivedAt !== null ||

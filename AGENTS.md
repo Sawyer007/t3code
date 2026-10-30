@@ -11,8 +11,8 @@
 >   [Maintaining the local automatic handoff patch](docs/operations/development.md#maintaining-the-local-automatic-handoff-patch).
 > - Behavior: [Automatic provider handoff](docs/user/usage.md#automatic-provider-handoff). Core logic:
 >   `apps/server/src/orchestration-v2/usageLimitHandoff.ts` and `UsageLimitRecoveryWorker.ts`.
-> - Handoff only moves forward through the configured order, never back to earlier entries. This is
->   intentional; do not add cycling.
+> - Handoff wraps through the configured order and skips unavailable or exhausted accounts. Keep
+>   the failure-history guard so stale quota snapshots cannot cause repeated handoffs.
 > - After a handoff, composers follow the new model through upstream's draft reconciliation (#20886).
 >   The patch has no client-side model sync of its own; check that path before adding one.
 > - Work notes stay outside the repo in `D:\t3code-work-notes`. The patched app runs from this
