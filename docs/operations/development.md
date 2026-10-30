@@ -66,6 +66,19 @@ conflicts or failed checks. Resolve conflicts in the patch worktree and use `git
 or `git rebase --abort` to return that worktree to its previous state. A failed check needs fixing
 before rebuilding. The script does not push, replace an installed application, or restart servers.
 
+To use the patch in an installed desktop app, including on another computer, clone the fork,
+check out `local/auto-handoff`, run `vp i`, close the app, and run:
+
+```sh
+node scripts/install-auto-handoff.ts
+```
+
+It builds the server and web client and replaces only the app's `server.asar`, keeping the
+official one as `server.asar.official`. `node scripts/install-auto-handoff.ts --restore` puts it
+back. The patch must contain the installed release's commit, so rebase it onto the matching
+release first; otherwise the server may not know migrations the app already applied. App updates
+overwrite the swap, so run the script again after each one.
+
 Configure the server using [Automatic provider handoff](../user/usage.md#automatic-provider-handoff).
 
 ## Choosing a dev process
