@@ -27,14 +27,54 @@ function defaultResourcesDir(): string {
   throw new Error("Pass --resources <dir> with the installed app's resources directory.");
 }
 
-function run(command: string, commandArgs: ReadonlyArray<string>, cwd = repoRoot): string {
+function run(
+  command: string,
+  commandArgs: ReadonlyArray<string>,
+  cwd = repoRoot,
+  env: Record<string, string> = {},
+): string {
   return NodeChildProcess.execFileSync(command, commandArgs, {
     cwd,
+    env: { ...process.env, ...env },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
     // Only the .cmd shims need a shell; it would split the spaces in other arguments.
     shell: isWindows && (command === "npx" || command.endsWith(".cmd")),
   }).trim();
+}
+
+// Release builds bake the T3 Connect sign-in config into the client. A local build has none, so the
+// sign-in never loads and remote environments stay disconnected. These values are public in the
+// shipped client, so read them back from it (tracing tokens are deliberately not copied).
+function officialClientEnv(stageDist: string, appVersion: string): Record<string, string> {
+  const env: Record<string, string> = { APP_VERSION: appVersion };
+  const assetsDir = NodePath.join(stageDist, "client", "assets");
+  const file = NodeFS.readdirSync(assetsDir).find((name) => /^publicConfig-.*\.js$/.test(name));
+  const source = file ? NodeFS.readFileSync(NodePath.join(assetsDir, file), "utf8") : "";
+  const pick = (text: string, pattern: RegExp) => pattern.exec(text)?.[1];
+  const key = pick(source, /clerkPublishableKey:\w+\(`(pk_(?:live|test)_[\w=-]+)`\)/);
+  const template = pick(source, /clerkJwtTemplate:\w+\(`([^`]+)`\)/);
+  const relay = pick(source, /relayUrl:\w+\(`(https:\/\/[^`]+)`\)/);
+  const serverChunk = NodeFS.readdirSync(stageDist).find((name) => /^binCli-.*\.mjs$/.test(name));
+  const cliClientId = serverChunk
+    ? pick(
+        NodeFS.readFileSync(NodePath.join(stageDist, serverChunk), "utf8"),
+        /buildTimeClerkCliOAuthClientId = readBuildTimeValue\("([^"]+)"\)/,
+      )
+    : undefined;
+  if (key && template && relay) {
+    env.VITE_CLERK_PUBLISHABLE_KEY = env.T3CODE_CLERK_PUBLISHABLE_KEY = key;
+    env.VITE_CLERK_JWT_TEMPLATE = env.T3CODE_CLERK_JWT_TEMPLATE = template;
+    env.VITE_T3CODE_RELAY_URL = env.T3CODE_RELAY_URL = relay;
+    if (cliClientId) {
+      env.VITE_CLERK_CLI_OAUTH_CLIENT_ID = env.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID = cliClientId;
+    }
+  } else {
+    console.warn(
+      "Could not read the T3 Connect config from the installed client; sign-in may fail.",
+    );
+  }
+  return env;
 }
 
 const asar = (...asarArgs: ReadonlyArray<string>) =>
@@ -100,15 +140,18 @@ try {
     }
   }
 
+  // Always start from the official asar: a previous run already replaced the client in server.asar.
+  const stage = NodePath.join(work, "stage");
+  asar("extract", NodeFS.existsSync(backupAsar) ? backupAsar : serverAsar, stage);
+  const stageDist = NodePath.join(stage, "apps", "server", "dist");
+
   if (!flag("--no-build")) {
     const vp = NodePath.join(repoRoot, "node_modules", ".bin", isWindows ? "vp.cmd" : "vp");
-    run(vp, ["run", "build:bundle"], NodePath.join(repoRoot, "apps", "server"));
-    run(vp, ["build"], NodePath.join(repoRoot, "apps", "web"));
+    const env = officialClientEnv(stageDist, installed.version);
+    run(vp, ["run", "build:bundle"], NodePath.join(repoRoot, "apps", "server"), env);
+    run(vp, ["build"], NodePath.join(repoRoot, "apps", "web"), env);
   }
 
-  const stage = NodePath.join(work, "stage");
-  asar("extract", serverAsar, stage);
-  const stageDist = NodePath.join(stage, "apps", "server", "dist");
   const serverDist = NodePath.join(repoRoot, "apps", "server", "dist");
   const webDist = NodePath.join(repoRoot, "apps", "web", "dist");
 
