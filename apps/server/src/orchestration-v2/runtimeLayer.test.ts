@@ -7550,6 +7550,9 @@ it.layer(layerSharedApplicationDataPlaneTest)("shared application data plane", (
 it.layer(layerTest)("usage-limit recovery", (it) => {
   it.effect.each([
     "handoff",
+    "wrapped-handoff",
+    "same-account",
+    "unlisted-target",
     "disabled",
     "selection-changed",
     "snoozed",
@@ -7570,7 +7573,12 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
       const now = yield* DateTime.now;
       yield* settings.updateSettings({
         autoHandoffLimitedThreads: true,
-        usageLimitHandoffOrder: [modelSelection, target],
+        usageLimitHandoffOrder:
+          scenario === "wrapped-handoff"
+            ? [target, modelSelection]
+            : scenario === "unlisted-target"
+              ? [modelSelection]
+              : [modelSelection, target],
       });
       yield* seedProject({
         projectId,
@@ -7770,7 +7778,7 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
         threadId,
         messageId: MessageId.make(`handoff:continue:${scenario}`),
         usageLimitHandoffOfRunId: source.id,
-        modelSelection: target,
+        modelSelection: scenario === "same-account" ? modelSelection : target,
         text: "Continue where you left off.",
         attachments: [],
         dispatchMode: { type: "start_immediately" as const },
@@ -7780,10 +7788,11 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
       yield* orchestrator.dispatch(command);
       yield* orchestrator.dispatch(command);
       const after = yield* orchestrator.getThreadProjection(threadId);
-      assert.lengthOf(after.runs, before.runs.length + (scenario === "handoff" ? 1 : 0));
+      const handedOff = scenario === "handoff" || scenario === "wrapped-handoff";
+      assert.lengthOf(after.runs, before.runs.length + (handedOff ? 1 : 0));
       assert.equal(after.thread.runtimeMode, "approval-required");
       assert.equal(after.thread.worktreePath, before.thread.worktreePath);
-      if (scenario === "handoff") {
+      if (handedOff) {
         assert.equal(after.thread.providerInstanceId, alternateInstanceId);
         assert.isNotNull(after.runs.at(-1)!.contextHandoffId);
         assert.include(
@@ -7795,8 +7804,8 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
         );
         yield* orchestrator.dispatch({
           ...command,
-          commandId: CommandId.make("handoff:another-delivery"),
-          messageId: MessageId.make("handoff:another-delivery"),
+          commandId: CommandId.make(`handoff:another-delivery:${scenario}`),
+          messageId: MessageId.make(`handoff:another-delivery:${scenario}`),
         });
         assert.lengthOf(
           (yield* orchestrator.getThreadProjection(threadId)).runs,
