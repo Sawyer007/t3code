@@ -32,7 +32,8 @@ function run(command: string, commandArgs: ReadonlyArray<string>, cwd = repoRoot
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
-    shell: isWindows,
+    // Only the .cmd shims need a shell; it would split the spaces in other arguments.
+    shell: isWindows && (command === "npx" || command.endsWith(".cmd")),
   }).trim();
 }
 
