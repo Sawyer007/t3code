@@ -2,9 +2,16 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   ProviderDriverKind,
   ProviderInstanceId,
+  MessageId,
+  NodeId,
+  RunId,
+  ThreadId,
+  TurnItemId,
   type ModelSelection,
+  type OrchestrationV2ThreadProjection,
   type ServerProvider,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { nextUsageLimitHandoff } from "./usageLimitHandoff.ts";
 
 const order = ["first", "second", "third"].map((id): ModelSelection => ({
@@ -30,13 +37,239 @@ const input = {
   providers,
   runtimeMode: "full-access" as const,
   nowMs: Date.parse("2026-10-18T01:00:00Z"),
+  history: { runs: [], turnItems: [] },
 };
 
+function failedHistory(resetAt?: string) {
+  const completedAt = DateTime.makeUnsafe("2026-10-18T00:45:00Z");
+  const threadId = ThreadId.make("limited-thread");
+  const runId = RunId.make("limited-run");
+  const nodeId = NodeId.make("limited-root");
+  return {
+    runs: [
+      {
+        id: runId,
+        threadId,
+        ordinal: 1,
+        providerInstanceId: order[0]!.instanceId,
+        modelSelection: order[0]!,
+        providerThreadId: null,
+        userMessageId: MessageId.make("limited-message"),
+        rootNodeId: nodeId,
+        activeAttemptId: null,
+        status: "failed",
+        requestedAt: completedAt,
+        startedAt: completedAt,
+        completedAt,
+        checkpointId: null,
+        contextHandoffId: null,
+      },
+    ],
+    turnItems: [
+      {
+        id: TurnItemId.make("limited-error"),
+        type: "error",
+        threadId,
+        runId,
+        nodeId,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 1,
+        status: "failed",
+        title: "Limit reached",
+        startedAt: completedAt,
+        completedAt,
+        updatedAt: completedAt,
+        failure: {
+          class: "usage_limit",
+          message: "Usage limit reached.",
+          code: "usageLimitExceeded",
+          retryable: null,
+          ...(resetAt === undefined ? {} : { resetAt }),
+        },
+      },
+    ],
+  } satisfies Pick<OrchestrationV2ThreadProjection, "runs" | "turnItems">;
+}
+
 describe("automatic usage-limit handoff selection", () => {
-  it("moves forward, never starts unlisted threads, and stops at the end", () => {
+  it("follows the order and wraps from the last account to the first", () => {
     expect(nextUsageLimitHandoff(input)).toEqual(order[1]);
-    expect(nextUsageLimitHandoff({ ...input, current: order[2]! })).toBeUndefined();
+    expect(nextUsageLimitHandoff({ ...input, current: order[1]! })).toEqual(order[2]);
+    expect(nextUsageLimitHandoff({ ...input, current: order[2]! })).toEqual(order[0]);
+  });
+
+  it("never selects the current account or starts unlisted threads", () => {
+    expect(nextUsageLimitHandoff({ ...input, order: [order[0]!] })).toBeUndefined();
+    expect(nextUsageLimitHandoff({ ...input, order: order.slice(1) })).toBeUndefined();
     expect(nextUsageLimitHandoff({ ...input, order: [] })).toBeUndefined();
+  });
+
+  it("skips an unavailable first account after wrapping", () => {
+    expect(
+      nextUsageLimitHandoff({
+        ...input,
+        current: order[2]!,
+        providers: [{ ...providers[0]!, enabled: false }, ...providers.slice(1)],
+      }),
+    ).toEqual(order[1]);
+  });
+
+  it("stops when all other accounts have reported limits with stale or missing quota data", () => {
+    const history = failedHistory();
+    expect(
+      nextUsageLimitHandoff({
+        ...input,
+        order: order.slice(0, 2),
+        current: order[1]!,
+        history,
+        providers: [
+          {
+            ...providers[0]!,
+            usageLimits: {
+              checkedAt: "2026-10-18T00:40:00Z",
+              windows: [{ id: "primary", label: "Session", kind: "session", usedPercent: 99 }],
+            },
+          },
+          providers[1]!,
+        ],
+      }),
+    ).toBeUndefined();
+    expect(
+      nextUsageLimitHandoff({ ...input, order: order.slice(0, 2), current: order[1]!, history }),
+    ).toBeUndefined();
+  });
+
+  it("reuses an earlier limited account only after its reported reset", () => {
+    const wrapped = {
+      ...input,
+      current: order[2]!,
+      history: failedHistory("2026-10-18T01:30:00Z"),
+    };
+    expect(nextUsageLimitHandoff(wrapped)).toEqual(order[1]);
+    expect(
+      nextUsageLimitHandoff({ ...wrapped, nowMs: Date.parse("2026-10-18T01:30:00Z") }),
+    ).toEqual(order[0]);
+    expect(
+      nextUsageLimitHandoff({ ...wrapped, history: failedHistory("2026-10-18T00:30:00Z") }),
+    ).toEqual(order[1]);
+  });
+
+  it("accepts a newer available quota reading after a failure without a reset", () => {
+    expect(
+      nextUsageLimitHandoff({
+        ...input,
+        current: order[2]!,
+        history: failedHistory(),
+        providers: [
+          {
+            ...providers[0]!,
+            usageLimits: {
+              checkedAt: "2026-10-18T00:50:00Z",
+              windows: [{ id: "primary", label: "Session", kind: "session", usedPercent: 10 }],
+            },
+          },
+          ...providers.slice(1),
+        ],
+      }),
+    ).toEqual(order[0]);
+  });
+
+  it("does not let queued or cancelled unstarted runs hide an exhausted account", () => {
+    const history = failedHistory();
+    const run = history.runs[0]!;
+    expect(
+      nextUsageLimitHandoff({
+        ...input,
+        current: order[2]!,
+        history: {
+          ...history,
+          runs: [
+            run,
+            { ...run, id: RunId.make("queued"), ordinal: 2, status: "queued", completedAt: null },
+            {
+              ...run,
+              id: RunId.make("cancelled"),
+              ordinal: 3,
+              status: "cancelled",
+              startedAt: null,
+            },
+          ],
+        },
+      }),
+    ).toEqual(order[1]);
+  });
+
+  it("allows an account again after a later successful run", () => {
+    const history = failedHistory();
+    const run = history.runs[0]!;
+    expect(
+      nextUsageLimitHandoff({
+        ...input,
+        current: order[2]!,
+        history: {
+          ...history,
+          runs: [run, { ...run, id: RunId.make("successful"), ordinal: 2, status: "completed" }],
+        },
+      }),
+    ).toEqual(order[0]);
+  });
+
+  it("skips aliases of an earlier exhausted account when wrapping", () => {
+    const usageLimits = {
+      credentialFingerprint: "same-account",
+      checkedAt: "2026-10-18T00:00:00Z",
+      windows: [],
+    };
+    expect(
+      nextUsageLimitHandoff({
+        ...input,
+        current: order[2]!,
+        history: failedHistory(),
+        providers: [
+          { ...providers[0]!, usageLimits },
+          { ...providers[1]!, usageLimits },
+          providers[2]!,
+        ],
+      }),
+    ).toBeUndefined();
+  });
+
+  it("clears an older limit when another instance of the same account later succeeds", () => {
+    const usageLimits = {
+      credentialFingerprint: "same-account",
+      checkedAt: "2026-10-18T00:00:00Z",
+      windows: [],
+    };
+    const history = failedHistory();
+    const run = history.runs[0]!;
+    expect(
+      nextUsageLimitHandoff({
+        ...input,
+        current: order[2]!,
+        history: {
+          ...history,
+          runs: [
+            run,
+            {
+              ...run,
+              id: RunId.make("alias-success"),
+              ordinal: 2,
+              providerInstanceId: order[1]!.instanceId,
+              modelSelection: order[1]!,
+              status: "completed",
+            },
+          ],
+        },
+        providers: [
+          { ...providers[0]!, usageLimits },
+          { ...providers[1]!, usageLimits },
+          providers[2]!,
+        ],
+      }),
+    ).toEqual(order[0]);
   });
 
   it.each([

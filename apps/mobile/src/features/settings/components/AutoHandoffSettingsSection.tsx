@@ -111,8 +111,8 @@ function HandoffOrderEditor(props: {
   return (
     <View className="gap-3 p-4">
       <Text className="text-sm text-foreground-muted">
-        Add and save at least two provider accounts to enable handoff. It moves forward through this
-        order; accounts can share quota.
+        Add and save at least two provider accounts to enable handoff. After the last account, it
+        starts from the top and skips unavailable or exhausted accounts. Accounts can share quota.
       </Text>
       {draft.map((selection, index) => (
         <View key={selection.instanceId} className="gap-2">

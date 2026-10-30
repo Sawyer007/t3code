@@ -172,11 +172,13 @@ with those configured in this environment. Each instance may appear once. Only c
 current instance appears in the list participate. Automatic handoff is off by default. Set
 `autoHandoffLimitedThreads` to `false` to turn it off while keeping the order.
 
-Handoffs move forward through the list, skipping unavailable, project-disabled, or known exhausted
-targets. Models on the same account can share the same limit; configure independently authenticated
-instances for separate accounts. If no later target is available, normal limit recovery applies:
+Handoffs follow the list and wrap from the last account to the first, skipping the current account
+and unavailable, project-disabled, or known exhausted targets. An account that has already reported
+a limit in this conversation is skipped until its reported reset or a newer allowance reading shows
+it is available. Models on the same account can share the same limit; configure independently
+authenticated instances for separate accounts. If no target is available, normal limit recovery applies:
 with **Auto-resume limited threads** enabled, the current provider resumes at its reported reset.
-A missing reset time requires manual continuation. The list does not cycle back to earlier entries.
+A missing reset time requires manual continuation when no other account is available.
 
 The conversation retains its workspace, permission mode, and saved history using the normal portable
 handoff. Native reasoning, tool state, and attachments are not replayed. Pending questions and
