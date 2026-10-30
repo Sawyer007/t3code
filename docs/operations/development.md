@@ -74,7 +74,8 @@ node scripts/install-auto-handoff.ts
 ```
 
 It builds the server and web client and replaces only the app's `server.asar`, keeping the
-official one as `server.asar.official`. `node scripts/install-auto-handoff.ts --restore` puts it
+official one as `server.asar.official`. It copies the T3 Connect sign-in settings from the installed
+client, because a local build has none and remote environments would never connect. `node scripts/install-auto-handoff.ts --restore` puts it
 back. The patch must contain the installed release's commit, so rebase it onto the matching
 release first; otherwise the server may not know migrations the app already applied. App updates
 overwrite the swap, so run the script again after each one.
