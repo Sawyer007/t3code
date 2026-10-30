@@ -184,8 +184,6 @@ function HandoffOrderEditor(props: {
                   instanceId={selection.instanceId}
                   models={entry.models}
                   model={selection.model}
-                  prompt=""
-                  onPromptChange={() => {}}
                   modelOptions={selection.options}
                   allowPromptInjectedEffort={false}
                   planModeEnabled={props.settings.planModeEnabled}
