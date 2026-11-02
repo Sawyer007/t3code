@@ -53,8 +53,9 @@ With `origin` on git.cafe, work through GitCafe and leave GitHub's API alone:
 Keep `main` free of fork-specific commits and track the original repository as `upstream`.
 Official binaries do not include this patch. It follows stable releases only: for each installed
 release, a `patch/v<version>` branch is cut from that release's tag and the patch is ported onto it.
-The update procedure, its script, and the exported patch series live outside the repo in
-`D:\T3 code patch` (see its `CLAUDE.md`).
+The update procedure, its script, the exported patch series, and the build worktree (`build\`) live
+in `D:\T3-code-patch` (see its `AGENTS.md`). Its path must not contain spaces: Vite cannot build
+from one.
 
 To use the patch in an installed desktop app, check out the `patch/v<version>` branch matching the
 installed release, run `vp i`, close the app, and run:

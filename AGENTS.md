@@ -8,7 +8,8 @@
 > - The patch follows **stable releases** (`v0.1.x` tags, never nightly or preview) and is installed
 >   into the user's installed app by swapping `server.asar`. Each release gets a `patch/v<version>`
 >   branch cut from that release's tag. The patch home, update script, and exported patch series are in
->   `D:\T3 code patch`; read its `CLAUDE.md` before updating. Keep the patch small so it ports cleanly.
+>   `D:\T3-code-patch`, whose `build\` folder is this worktree; read its `AGENTS.md` before updating.
+>   Keep the patch small so it ports cleanly.
 > - See [Maintaining the local automatic handoff patch](docs/operations/development.md#maintaining-the-local-automatic-handoff-patch).
 > - Behavior: [Automatic provider handoff](docs/user/usage.md#automatic-provider-handoff). Core logic:
 >   `apps/server/src/orchestration-v2/usageLimitHandoff.ts` and `UsageLimitRecoveryWorker.ts`.
