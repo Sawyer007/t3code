@@ -3,21 +3,21 @@
 > **This checkout is a personal fork carrying one local patch.** `main` mirrors upstream
 > [pingdotgg/t3code](https://github.com/pingdotgg/t3code) and never gets fork commits. The only custom
 > work is automatic provider handoff: when a provider reports a usage limit, the server moves the
-> thread to the next configured provider so work continues while nobody is at the computer. It lives
-> on the `local/auto-handoff` branch, checked out in `C:\Users\Sawyer\.t3\worktrees\t3code\local-auto-handoff`.
+> thread to the next configured provider so work continues while nobody is at the computer.
 >
-> - Make patch changes on `local/auto-handoff` only, and keep the patch small so it rebases cleanly.
-> - Update from upstream with `scripts/update-auto-handoff.ps1`; both checkouts must be clean first. See
->   [Maintaining the local automatic handoff patch](docs/operations/development.md#maintaining-the-local-automatic-handoff-patch).
+> - The patch follows **stable releases** (`v0.1.x` tags, never nightly or preview) and is installed
+>   into the user's installed app by swapping `server.asar`. Each release gets a `patch/v<version>`
+>   branch cut from that release's tag. The patch home, update script, and exported patch series are in
+>   `D:\T3 code patch`; read its `CLAUDE.md` before updating. Keep the patch small so it ports cleanly.
+> - See [Maintaining the local automatic handoff patch](docs/operations/development.md#maintaining-the-local-automatic-handoff-patch).
 > - Behavior: [Automatic provider handoff](docs/user/usage.md#automatic-provider-handoff). Core logic:
 >   `apps/server/src/orchestration-v2/usageLimitHandoff.ts` and `UsageLimitRecoveryWorker.ts`.
 > - Handoff wraps through the configured order and skips unavailable or exhausted accounts. Keep
 >   the failure-history guard so stale quota snapshots cannot cause repeated handoffs.
 > - After a handoff, composers follow the new model through upstream's draft reconciliation (#20886).
 >   The patch has no client-side model sync of its own; check that path before adding one.
-> - Work notes stay outside the repo in `D:\t3code-work-notes`. The patched app runs from this
->   worktree's build on `127.0.0.1:16658`; stop it only to update it, at the user's request.
-> - Push to `origin` (the fork) only when asked. After a rebase the branch needs `--force-with-lease`.
+> - Work notes stay outside the repo in `D:\t3code-work-notes`.
+> - Push to `origin` (the fork) only when asked.
 
 T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, Kiro) and serves web, desktop, and mobile clients.
 
