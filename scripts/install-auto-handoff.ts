@@ -93,23 +93,16 @@ const serverAsar = NodePath.join(resourcesDir, "server.asar");
 const unpackedDir = `${serverAsar}.unpacked`;
 const backupAsar = NodePath.join(resourcesDir, "server.asar.official");
 const backupUnpacked = `${backupAsar}.unpacked`;
+// Records which release the backup came from: an app update replaces server.asar but can leave an
+// older backup behind, which must never be built from or restored.
+const backupStamp = `${backupAsar}.json`;
+const PATCH_MARKER = "usageLimitHandoffOrder";
 
 if (!NodeFS.existsSync(serverAsar)) throw new Error(`No server.asar in ${resourcesDir}.`);
 assertAppClosed();
 
-if (flag("--restore")) {
-  if (!NodeFS.existsSync(backupAsar)) throw new Error("No official server.asar backup to restore.");
-  NodeFS.copyFileSync(backupAsar, serverAsar);
-  if (NodeFS.existsSync(backupUnpacked))
-    NodeFS.cpSync(backupUnpacked, unpackedDir, { recursive: true });
-  console.log("Restored the official server.asar.");
-  process.exit(0);
-}
-
 const work = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-auto-handoff-"));
 try {
-  // Refuse a patch built from older code than the app: its server would not know the
-  // migrations the app already applied to the user's database.
   // `extract-file` writes into its working directory, so keep it out of the checkout.
   run(
     "npx",
@@ -129,13 +122,60 @@ try {
     readonly t3codeCommitHash?: string;
   };
   const installedCommit = installed.t3codeCommitHash;
+
+  // A server.asar without the patch is the official one of the installed release, so it becomes
+  // the backup. A patched one needs a backup from this same release.
+  const isPatched = NodeFS.readFileSync(serverAsar).includes(PATCH_MARKER);
+  const stamp = NodeFS.existsSync(backupStamp)
+    ? (JSON.parse(NodeFS.readFileSync(backupStamp, "utf8")) as { readonly version: string })
+    : undefined;
+  if (!isPatched) {
+    NodeFS.copyFileSync(serverAsar, backupAsar);
+    NodeFS.rmSync(backupUnpacked, { recursive: true, force: true });
+    if (NodeFS.existsSync(unpackedDir))
+      NodeFS.cpSync(unpackedDir, backupUnpacked, { recursive: true });
+    NodeFS.writeFileSync(
+      backupStamp,
+      JSON.stringify({ version: installed.version, commit: installedCommit }, null, 2),
+    );
+  } else if (!NodeFS.existsSync(backupAsar)) {
+    throw new Error(
+      "server.asar is already patched and no official backup exists. Reinstall the app.",
+    );
+  } else if (stamp !== undefined && stamp.version !== installed.version) {
+    throw new Error(
+      `The official backup is from ${stamp.version}, but ${installed.version} is installed. Reinstall the app.`,
+    );
+  }
+
+  if (flag("--restore")) {
+    if (isPatched) {
+      NodeFS.copyFileSync(backupAsar, serverAsar);
+      if (NodeFS.existsSync(backupUnpacked))
+        NodeFS.cpSync(backupUnpacked, unpackedDir, { recursive: true });
+    }
+    console.log(`Restored the official server.asar (app ${installed.version}).`);
+    process.exit(0);
+  }
+
+  // The patch must sit on exactly the installed release. Older code would not know migrations the
+  // app already applied; newer code may not match the installed desktop shell.
   if (installedCommit && !flag("--force")) {
     try {
       run("git", ["merge-base", "--is-ancestor", installedCommit, "HEAD"]);
     } catch {
       throw new Error(
         `Installed app ${installed.version} (${installedCommit}) is not contained in this checkout. ` +
-          "Rebase the patch onto that release first, or pass --force.",
+          "Port the patch onto that release first, or pass --force.",
+      );
+    }
+    // Commits reachable from an official branch or tag are upstream code, not the patch.
+    const count = (...extra: ReadonlyArray<string>) =>
+      run("git", ["rev-list", "--count", `${installedCommit}..HEAD`, ...extra]);
+    if (count() !== count("--not", "--remotes=upstream", "--tags")) {
+      throw new Error(
+        `This checkout contains official commits newer than the installed app ${installed.version}. ` +
+          "Build from the patch branch for the installed release, or pass --force.",
       );
     }
   }
@@ -181,11 +221,6 @@ try {
   const built = NodePath.join(work, "server.asar");
   asar("pack", stage, built, "--unpack", "*.{node,dll,exe}");
 
-  if (!NodeFS.existsSync(backupAsar)) {
-    NodeFS.copyFileSync(serverAsar, backupAsar);
-    if (NodeFS.existsSync(unpackedDir))
-      NodeFS.cpSync(unpackedDir, backupUnpacked, { recursive: true });
-  }
   NodeFS.copyFileSync(built, serverAsar);
   NodeFS.cpSync(`${built}.unpacked`, unpackedDir, { recursive: true });
   console.log(`Installed the patched server into ${resourcesDir} (app ${installed.version}).`);
