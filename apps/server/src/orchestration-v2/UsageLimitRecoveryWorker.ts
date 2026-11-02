@@ -169,7 +169,7 @@ const makeSweep = Effect.gen(function* () {
               createdBy: "user",
               creationSource: "server",
             };
-      if (target === undefined && order.length > 1) awaitingHandoff = true;
+      if (canHandoff && target === undefined) awaitingHandoff = true;
       if (command === null) continue;
       acted = true;
       yield* Effect.gen(function* () {
