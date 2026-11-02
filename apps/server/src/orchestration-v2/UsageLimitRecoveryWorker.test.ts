@@ -1,5 +1,11 @@
 import { assert, describe, it } from "@effect/vitest";
-import { RunId, ThreadId, type OrchestrationV2DomainEvent } from "@t3tools/contracts";
+import {
+  ProjectId,
+  ProviderInstanceId,
+  RunId,
+  ThreadId,
+  type OrchestrationV2DomainEvent,
+} from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -8,6 +14,7 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as Orchestrator from "./Orchestrator.ts";
@@ -46,7 +53,13 @@ it.effect("idle sweeps skip SQL until the next wake time or a relevant event", (
             getSettings: Effect.succeed({
               autoResumeLimitedThreads: true,
               snoozeLimitedThreads: false,
+              autoHandoffLimitedThreads: false,
+              usageLimitHandoffOrder: [],
             } as never),
+            streamChanges: Stream.never,
+          }),
+          Layer.mock(ProviderRegistry.ProviderRegistry)({
+            getProviders: Effect.succeed([]),
             streamChanges: Stream.never,
           }),
         ),
@@ -70,6 +83,77 @@ it.effect("idle sweeps skip SQL until the next wake time or a relevant event", (
   }),
 );
 
+it.effect("a thread waiting for a free handoff account keeps the sweep awake", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(Date.parse("2026-07-01T09:00:00.000Z"));
+    const startMs = Date.parse("2026-07-01T09:00:00.000Z");
+    const queries = yield* Queue.unbounded<number>();
+    const order = ["first", "second"].map((id) => ({
+      instanceId: ProviderInstanceId.make(id),
+      model: "test-model",
+    }));
+    const failedAt = DateTime.makeUnsafe(startMs);
+    const waiting: ProjectionStore.ProjectionLimitRecoveryCandidate = {
+      id: ThreadId.make("thread:waiting"),
+      projectId: ProjectId.make("project:waiting"),
+      modelSelection: order[0]!,
+      runtimeMode: "full-access",
+      status: "failed",
+      lastErrorClass: "usage_limit",
+      usageLimitResetAt: null,
+      latestRunId: RunId.make("run:waiting"),
+      latestRunCompletedAt: failedAt,
+      updatedAt: failedAt,
+      archivedAt: null,
+      settledOverride: null,
+      pendingRuntimeRequest: null,
+      limitRecovery: null,
+      snoozedUntil: null,
+    };
+    const layer = UsageLimitRecoveryWorker.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Scheduler.layer,
+          Layer.mock(ProjectionStore.ProjectionStoreV2)({
+            getLimitRecoveryCandidates: () =>
+              Clock.currentTimeMillis.pipe(
+                Effect.flatMap((nowMs) => Queue.offer(queries, nowMs - startMs)),
+                Effect.as([waiting]),
+              ),
+            getLimitRecoveryWakeAt: () => Effect.succeed(null),
+            getThreadRecords: () => Effect.succeed({ runs: [], turnItems: [] } as never),
+          }),
+          Layer.mock(ThreadManagement.ThreadManagementService)({}),
+          Layer.mock(Orchestrator.OrchestratorV2)({ streamDomainEvents: Stream.never }),
+          Layer.mock(ServerSettings.ServerSettingsService)({
+            getSettings: Effect.succeed({
+              autoResumeLimitedThreads: true,
+              snoozeLimitedThreads: false,
+              autoHandoffLimitedThreads: true,
+              usageLimitHandoffOrder: order,
+              providerInstances: { first: { enabled: true }, second: { enabled: true } },
+              projectSettingsOverrides: {},
+            } as never),
+            streamChanges: Stream.never,
+          }),
+          // No provider is available, so no handoff target exists yet.
+          Layer.mock(ProviderRegistry.ProviderRegistry)({
+            getProviders: Effect.succeed([]),
+            streamChanges: Stream.never,
+          }),
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const first = yield* Queue.take(queries);
+      yield* TestClock.adjust("30 seconds");
+      // Without the wait guard the sweep would record "nothing due" and stay idle.
+      const later = yield* Queue.take(queries);
+      assert.isAbove(later, first);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
 const HOUR_MS = 60 * 60 * 1000;
 const nowMs = Date.parse("2026-10-19T12:00:00.000Z");
 
@@ -77,6 +161,9 @@ const failedThread = (failedAgoMs: number, resetAgoMs: number) => {
   const failedAt = DateTime.makeUnsafe(nowMs - failedAgoMs);
   const candidate: ProjectionStore.ProjectionLimitRecoveryCandidate = {
     id: ThreadId.make("thread:limited"),
+    projectId: ProjectId.make("project:limited"),
+    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test-model" },
+    runtimeMode: "full-access",
     status: "failed",
     lastErrorClass: "usage_limit",
     usageLimitResetAt: DateTime.formatIso(DateTime.makeUnsafe(nowMs - resetAgoMs)),
