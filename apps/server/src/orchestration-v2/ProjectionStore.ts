@@ -539,6 +539,12 @@ export interface ProjectionStoreV2Shape {
     readonly snooze: boolean;
     readonly handoff?: boolean;
   }) => Effect.Effect<ReadonlyArray<ProjectionLimitRecoveryCandidate>, ProjectionStoreV2Error>;
+  readonly getUsageThresholdHandoffCandidates: (
+    instanceIds: ReadonlyArray<ProviderInstanceId>,
+  ) => Effect.Effect<
+    ReadonlyArray<Pick<OrchestrationV2Run, "id" | "threadId" | "activeAttemptId">>,
+    ProjectionStoreV2Error
+  >;
   /** Epoch ms of the next armed reset or snooze end after `now`, when a waiting thread becomes a candidate. */
   readonly getLimitRecoveryWakeAt: (
     now: DateTime.Utc,
@@ -4074,6 +4080,24 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
     );
 
+    const getUsageThresholdHandoffCandidates = Effect.fn(
+      "ProjectionStore.getUsageThresholdHandoffCandidates",
+    )(
+      function* (instanceIds: ReadonlyArray<ProviderInstanceId>) {
+        const rows = yield* sql<{ readonly payload_json: string }>`
+        SELECT r.payload_json FROM orchestration_v2_projection_runs r
+        INNER JOIN orchestration_v2_projection_threads t ON t.thread_id = r.thread_id
+          -- Match the partial recovery index predicate to avoid scanning finished runs.
+          WHERE r.status IN ('queued', 'preparing', 'starting', 'running', 'waiting')
+            AND r.status = 'running'
+          AND r.provider_instance_id IN ${sql.in(instanceIds)}
+          AND t.archived_at IS NULL AND t.deleted_at IS NULL
+      `;
+        return yield* Effect.forEach(rows, (row) => decodeRunPayload(row.payload_json));
+      },
+      Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+    );
+
     const getLimitRecoveryWakeAt = Effect.fn("ProjectionStore.getLimitRecoveryWakeAt")(
       function* (now: DateTime.Utc) {
         const nowIso = DateTime.formatIso(now);
@@ -7307,6 +7331,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getPlan: readOnReader(getPlan),
       getProviderControlContext: readOnReader(getProviderControlContext),
       getLimitRecoveryCandidates: readOnReader(getLimitRecoveryCandidates),
+      getUsageThresholdHandoffCandidates: readOnReader(getUsageThresholdHandoffCandidates),
       getLimitRecoveryWakeAt: readOnReader(getLimitRecoveryWakeAt),
       getRecoveryThreadIds: readOnReader(getRecoveryThreadIds),
       getUnreadableThreadIds: readOnReader(getUnreadableThreadIds),

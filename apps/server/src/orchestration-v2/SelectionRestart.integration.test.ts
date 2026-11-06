@@ -15,6 +15,7 @@ import {
   ProviderThreadId,
   ProviderTurnId,
   type RunId,
+  type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -29,10 +30,16 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as EffectWorker from "./EffectWorker.ts";
 import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
+import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ServerSettings from "../serverSettings.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as ThreadManagement from "./ThreadManagementService.ts";
+import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 
 const driver = ProviderDriverKind.make("codex");
 const providerInstanceId = ProviderInstanceId.make("codex-restart-test");
@@ -723,12 +730,23 @@ it.live(
     ),
 );
 
-it.live.each(["active", "idle", "selection-command", "pooled", "separate-home"] as const)(
+const accountSwitchModes = [
+  "active",
+  "idle",
+  "selection-command",
+  "pooled",
+  "separate-home",
+  "usage-threshold",
+] as const;
+
+it.live.each(accountSwitchModes)(
   "preserves native history only for compatible account switches (%s)",
   (mode) =>
     Effect.scoped(
       Effect.gen(function* () {
         const name = `shared-home-${mode}`;
+        const active = mode === "active" || mode === "usage-threshold";
+        const separateHome = mode === "separate-home" || mode === "usage-threshold";
         const cwd = yield* checkpointWorkspace(name);
         const threadId = ThreadId.make(`thread:${name}`);
         const targetId = ProviderInstanceId.make("codex-shadow-account");
@@ -777,8 +795,7 @@ it.live.each(["active", "idle", "selection-command", "pooled", "separate-home"] 
           getMetadata: (instanceId) =>
             Effect.succeed({
               driver,
-              continuationKey:
-                mode === "separate-home" ? `codex:home:/${instanceId}` : "codex:home:/shared",
+              continuationKey: separateHome ? `codex:home:/${instanceId}` : "codex:home:/shared",
               enabled: true,
               capabilities,
             }),
@@ -786,15 +803,16 @@ it.live.each(["active", "idle", "selection-command", "pooled", "separate-home"] 
         yield* Effect.gen(function* () {
           const orchestrator = yield* Orchestrator.OrchestratorV2;
           const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          const projectId = ProjectId.make(`project:${name}`);
           const selection = {
             ...initialSelection,
-            model: mode === "active" ? initialSelection.model : "complete",
+            model: active ? initialSelection.model : "complete",
           };
           yield* orchestrator.dispatch({
             type: "thread.create",
             commandId: CommandId.make(`${name}:create`),
             threadId,
-            projectId: ProjectId.make(`project:${name}`),
+            projectId,
             title: name,
             modelSelection: selection,
             runtimeMode: "full-access",
@@ -808,7 +826,7 @@ it.live.each(["active", "idle", "selection-command", "pooled", "separate-home"] 
             Effect.gen(function* () {
               const terminal = yield* orchestrator.streamDomainEvents.pipe(
                 Stream.filter((event) =>
-                  mode === "active" && step === "first"
+                  active && step === "first"
                     ? event.type === "provider-turn.updated" && event.payload.status === "running"
                     : event.type === "run.updated" && event.payload.status === "completed",
                 ),
@@ -841,6 +859,113 @@ it.live.each(["active", "idle", "selection-command", "pooled", "separate-home"] 
             (thread) => thread.id === first.thread.activeProviderThreadId,
           )!;
           const targetSelection = { instanceId: targetId, model: "complete" };
+          if (mode === "usage-threshold") {
+            const settings = yield* ServerSettings.ServerSettingsService;
+            const store = yield* ProjectionStore.ProjectionStoreV2;
+            const thresholds = { [providerInstanceId]: 90, [targetId]: 80 };
+            yield* settings.updateSettings({
+              autoHandoffLimitedThreads: true,
+              usageLimitHandoffOrder: [selection, targetSelection],
+              usageLimitHandoffThresholds: thresholds,
+              projectSettingsOverrides: {
+                [projectId]: {
+                  providerInstances: {
+                    [providerInstanceId]: { enabled: true },
+                    [targetId]: { enabled: true },
+                  },
+                },
+              },
+            });
+            const source = first.runs[0]!;
+            const candidates = yield* store.getUsageThresholdHandoffCandidates([
+              providerInstanceId,
+            ]);
+            assert.deepEqual(
+              candidates.map((run) => run.id),
+              [source.id],
+            );
+            const checkedAt = DateTime.formatIso(yield* DateTime.now);
+            const quotas = (sourceUsed: number, targetUsed: number) =>
+              Effect.succeed(
+                [selection, targetSelection].map((model, index): ServerProvider => ({
+                  instanceId: model.instanceId,
+                  driver,
+                  enabled: true,
+                  installed: true,
+                  status: "ready",
+                  version: null,
+                  auth: { status: "authenticated" },
+                  checkedAt,
+                  models: [
+                    { slug: model.model, name: model.model, isCustom: false, capabilities: null },
+                  ],
+                  slashCommands: [],
+                  skills: [],
+                  usageLimits: {
+                    checkedAt,
+                    windows: [
+                      {
+                        id: "session",
+                        kind: "session",
+                        label: "Session",
+                        usedPercent: index === 0 ? sourceUsed : targetUsed,
+                      },
+                    ],
+                  },
+                })),
+              );
+            assert.equal(
+              yield* orchestrator.autoHandoffAtUsageThreshold(source, quotas(89, 50)),
+              "skipped",
+            );
+            assert.equal(
+              yield* orchestrator.autoHandoffAtUsageThreshold(source, quotas(90, 80)),
+              "waiting",
+            );
+            assert.equal(
+              (yield* orchestrator.getThreadProjection(threadId)).runs[0]?.activeAttemptId,
+              source.activeAttemptId,
+            );
+            const terminal = yield* orchestrator.streamDomainEvents.pipe(
+              Stream.filter(
+                (event) => event.type === "run.updated" && event.payload.status === "completed",
+              ),
+              Stream.take(1),
+              Stream.runDrain,
+              Effect.forkScoped,
+            );
+            const layerThresholdWorker = UsageLimitRecoveryWorker.layer.pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  Layer.mock(ProviderRegistry.ProviderRegistry)({
+                    getProviders: quotas(90, 79),
+                    streamChanges: Stream.never,
+                  }),
+                  Layer.mock(ThreadManagement.ThreadManagementService)({}),
+                  Layer.succeed(Scheduler.Scheduler, {
+                    register: (_name, sweep) => sweep.pipe(Effect.orDie),
+                  }),
+                ),
+              ),
+            );
+            yield* Effect.void.pipe(Effect.provide(layerThresholdWorker));
+            assert.equal(
+              yield* orchestrator.autoHandoffAtUsageThreshold(source, quotas(90, 79)),
+              "skipped",
+            );
+            yield* worker.drain();
+            yield* Fiber.join(terminal);
+            const result = yield* orchestrator.getThreadProjection(threadId);
+            assert.lengthOf(result.runs, 1);
+            assert.equal(result.runs[0]?.providerInstanceId, targetId);
+            assert.equal(result.runs[0]?.status, "completed");
+            assert.lengthOf(result.contextHandoffs, 1);
+            assert.lengthOf(messages, 2);
+            assert.include(messages[1], "configured usage threshold");
+            yield* settings.updateSettings({ usageLimitHandoffThresholds: {} });
+            assert.deepEqual((yield* settings.getSettings).usageLimitHandoffThresholds, {});
+            return;
+          }
           if (mode === "selection-command") {
             yield* orchestrator.dispatch({
               type: "provider.switch",

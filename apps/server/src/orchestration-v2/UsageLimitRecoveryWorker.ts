@@ -17,7 +17,7 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
-import { nextUsageLimitHandoff } from "./usageLimitHandoff.ts";
+import { nextUsageLimitHandoff, usageHandoffThresholdReached } from "./usageLimitHandoff.ts";
 
 const MAX_OVERDUE_ARM_MS = 24 * 60 * 60 * 1000;
 
@@ -90,6 +90,7 @@ const affectsLimitRecovery = (event: OrchestrationV2DomainEvent) =>
   event.type.startsWith("thread.") ||
   event.type === "run.created" ||
   event.type === "run.updated" ||
+  (event.type === "provider-turn.updated" && event.payload.status === "running") ||
   event.type === "runtime-request.updated" ||
   event.type.startsWith("provider-session.") ||
   (event.type === "turn-item.updated" && event.payload.type === "error");
@@ -107,7 +108,7 @@ const makeSweep = Effect.gen(function* () {
     ),
   );
   yield* forkParked(Stream.runForEach(settings.streamChanges, () => due.invalidate));
-  // A fresh quota reading can free a handoff target.
+  // Quota updates can trigger a threshold handoff or free a target.
   yield* forkParked(Stream.runForEach(providers.streamChanges, () => due.invalidate));
   return Effect.fn("UsageLimitRecoveryWorker.sweep")(function* () {
     const now = yield* DateTime.now;
@@ -125,6 +126,39 @@ const makeSweep = Effect.gen(function* () {
     const available = yield* providers.getProviders;
     let acted = false;
     let awaitingHandoff = false;
+    if (preferences.autoHandoffLimitedThreads && preferences.usageLimitHandoffOrder.length > 1) {
+      const cappedInstances = available
+        .filter(
+          (provider) =>
+            usageHandoffThresholdReached(
+              provider,
+              preferences.usageLimitHandoffThresholds?.[provider.instanceId],
+              nowMs,
+            ) &&
+            preferences.usageLimitHandoffOrder.some(
+              (selection) => selection.instanceId === provider.instanceId,
+            ),
+        )
+        .map((provider) => provider.instanceId);
+      if (cappedInstances.length > 0) {
+        for (const candidate of yield* projections.getUsageThresholdHandoffCandidates(
+          cappedInstances,
+        )) {
+          const result = yield* orchestrator
+            .autoHandoffAtUsageThreshold(candidate, providers.getProviders)
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("orchestration-v2.threshold-handoff.dispatch-failed", {
+                  threadId: candidate.threadId,
+                  cause,
+                }).pipe(Effect.as("skipped" as const)),
+              ),
+            );
+          acted ||= result === "handed_off";
+          awaitingHandoff ||= result === "waiting";
+        }
+      }
+    }
     for (const thread of candidates) {
       const order = (
         preferences.autoHandoffLimitedThreads ? preferences.usageLimitHandoffOrder : []
@@ -140,6 +174,7 @@ const makeSweep = Effect.gen(function* () {
             order,
             current: thread.modelSelection,
             providers: available,
+            thresholds: preferences.usageLimitHandoffThresholds,
             runtimeMode: thread.runtimeMode,
             nowMs,
             history: yield* projections.getThreadRecords(thread.id, ["runs", "turnItems"], {

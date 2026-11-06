@@ -7,6 +7,7 @@ import type {
   ServerProvider,
   ServerProviderModel,
   ServerSettingsPatch,
+  UsageLimitHandoffThresholds,
 } from "@t3tools/contracts";
 import {
   getModelSelectionStringOptionValue,
@@ -49,11 +50,26 @@ export function editUsageLimitHandoffOrder(
 
 export function usageLimitHandoffOrderPatch(
   order: ReadonlyArray<ModelSelection>,
+  thresholds?: UsageLimitHandoffThresholds,
 ): ServerSettingsPatch {
   return {
     usageLimitHandoffOrder: order,
+    ...(thresholds === undefined ? {} : { usageLimitHandoffThresholds: thresholds }),
     ...(order.length < 2 ? { autoHandoffLimitedThreads: false } : {}),
   };
+}
+
+export function editUsageLimitHandoffThreshold(
+  thresholds: UsageLimitHandoffThresholds,
+  instanceId: ProviderInstanceId,
+  text: string,
+): UsageLimitHandoffThresholds {
+  if (text === "") {
+    const next = { ...thresholds };
+    delete next[instanceId];
+    return next;
+  }
+  return /^[1-9]\d?$/.test(text) ? { ...thresholds, [instanceId]: Number(text) } : thresholds;
 }
 
 export type HandoffTimelineRun = Pick<

@@ -497,7 +497,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
       ? ["Resume after usage limits"]
       : []),
-    ...(settings.autoHandoffLimitedThreads || settings.usageLimitHandoffOrder.length > 0
+    ...(settings.autoHandoffLimitedThreads ||
+    settings.usageLimitHandoffOrder.length > 0 ||
+    Object.keys(settings.usageLimitHandoffThresholds).length > 0
       ? ["Automatic provider handoff"]
       : []),
     ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
@@ -659,6 +661,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
       autoHandoffLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoHandoffLimitedThreads,
       usageLimitHandoffOrder: DEFAULT_UNIFIED_SETTINGS.usageLimitHandoffOrder,
+      usageLimitHandoffThresholds: DEFAULT_UNIFIED_SETTINGS.usageLimitHandoffThresholds,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       snoozePresets: DEFAULT_UNIFIED_SETTINGS.snoozePresets,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,

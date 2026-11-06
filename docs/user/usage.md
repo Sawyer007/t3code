@@ -175,15 +175,22 @@ using a proxy through `ANTHROPIC_AUTH_TOKEN`.
 
 ## Automatic provider handoff
 
-The automatic handoff extension continues a conversation with another configured provider
-when the current provider reports a usage limit. It runs on the server, so the client can disconnect
-while the server machine stays awake. It does not require another request to the exhausted provider.
+The automatic handoff extension continues a conversation with another configured provider when the
+current provider reports a usage limit or reaches a configured usage threshold. It runs on the server,
+so the client can disconnect while the server machine stays awake.
 
 On web or desktop, open **Settings → Threads → Usage limits → Automatic provider handoff**. On mobile, open
 **Settings → Thread behavior → Automatic provider handoff**. Select one environment, add provider
-accounts, choose their models, and arrange the fallback order. Choose **Save order**, then turn on
+accounts, choose their models, and arrange the fallback order. Choose **Save handoff settings**, then turn on
 **Automatic provider handoff**. At least two saved accounts are needed. Switching off keeps the
 saved list; removing accounts until fewer than two remain also switches it off.
+
+Set **Handoff at %** on an account to reserve some of its quota. At **90**, the server switches
+when any current quota window reports at least 90% used. An eligible fallback can take over an
+active turn after the server interrupts it and transfers its context. An account with a threshold
+needs a usage reading to be selected as a fallback. If none is eligible, the active account continues.
+Leave the field blank for handoff on a provider usage-limit error. Percentages depend on when each
+provider reports its usage.
 
 You can also merge these fields into the environment's `settings.json` (`userdata/settings.json`
 below T3 home):
@@ -191,6 +198,7 @@ below T3 home):
 ```json
 {
   "autoHandoffLimitedThreads": true,
+  "usageLimitHandoffThresholds": { "codex": 90 },
   "usageLimitHandoffOrder": [
     { "instanceId": "codex", "model": "your-codex-model" },
     { "instanceId": "claudeAgent", "model": "your-claude-model" },

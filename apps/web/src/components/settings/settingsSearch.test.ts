@@ -58,7 +58,7 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 ];
 
 describe("searchSettings", () => {
-  it.each(["handoff", "fallback", "predaja"])(
+  it.each(["handoff", "fallback", "predaja", "threshold", "prag"])(
     "finds automatic provider handoff for %s",
     (query) => {
       expect(searchSettings(query)).toContainEqual(

@@ -4,6 +4,7 @@ import type { ModelSelection, ServerConfig, ServerSettingsPatch } from "@t3tools
 import { AuthSettingsWriteScope } from "@t3tools/contracts";
 import {
   editUsageLimitHandoffOrder,
+  editUsageLimitHandoffThreshold,
   usageLimitHandoffOrderPatch,
 } from "@t3tools/client-runtime/handoff";
 import * as Equal from "effect/Equal";
@@ -13,7 +14,7 @@ import {
   getProviderOptionCurrentValue,
 } from "@t3tools/shared/model";
 
-import { AppText as Text } from "../../../components/ui/AppText";
+import { AppText as Text, AppTextInput } from "../../../components/ui/AppText";
 import { Button } from "../../../components/ui/Button";
 import { IconButton } from "../../../components/ui/IconButton";
 import { Menu } from "../../../components/ui/Menu";
@@ -83,7 +84,7 @@ function EnvironmentHandoffSettings({ target }: { readonly target: SettingsTarge
       />
       {supported ? (
         <HandoffOrderEditor
-          key={`${target.environmentId}:${JSON.stringify(settings.usageLimitHandoffOrder)}`}
+          key={`${target.environmentId}:${JSON.stringify([settings.usageLimitHandoffOrder, settings.usageLimitHandoffThresholds])}`}
           config={config}
           disabled={disabled}
           onSave={save}
@@ -99,8 +100,13 @@ function HandoffOrderEditor(props: {
   readonly onSave: (patch: ServerSettingsPatch) => void;
 }) {
   const saved = props.config.settings.usageLimitHandoffOrder;
+  const savedThresholds = props.config.settings.usageLimitHandoffThresholds;
   const [draft, setDraft] = useState(saved);
-  const dirty = !Equal.equals(saved, draft);
+  const [thresholds, setThresholds] = useState(savedThresholds);
+  const thresholdsChanged = !Equal.equals(savedThresholds, thresholds);
+  const dirty = !Equal.equals(saved, draft) || thresholdsChanged;
+  const supportsThresholds =
+    props.config.environment.capabilities.automaticProviderHandoffThresholds === true;
   const models = buildModelOptions(props.config, null, undefined, null).filter(
     (model) => !model.isUnavailable && !model.isHidden,
   );
@@ -114,6 +120,12 @@ function HandoffOrderEditor(props: {
         Add and save at least two provider accounts to enable handoff. After the last account, it
         starts from the top and skips unavailable or exhausted accounts. Accounts can share quota.
       </Text>
+      {supportsThresholds ? (
+        <Text className="text-sm text-foreground-muted">
+          Set Handoff at % to switch an active turn when the account reaches that usage. Leave it
+          blank to switch on the provider's usage-limit error.
+        </Text>
+      ) : null}
       {draft.map((selection, index) => (
         <View key={selection.instanceId} className="gap-2">
           <ModelMenu
@@ -161,6 +173,28 @@ function HandoffOrderEditor(props: {
             }
           />
           <View className="flex-row items-center gap-1">
+            {supportsThresholds ? (
+              <>
+                <Text className="text-sm">Handoff at %</Text>
+                <AppTextInput
+                  className="min-w-16 rounded-md border border-border px-2 py-1 text-sm"
+                  accessibilityLabel={`Handoff at percent for provider ${index + 1}`}
+                  keyboardType="number-pad"
+                  placeholder="Off"
+                  value={
+                    Object.hasOwn(thresholds, selection.instanceId)
+                      ? String(thresholds[selection.instanceId])
+                      : ""
+                  }
+                  editable={!props.disabled}
+                  onChangeText={(value) =>
+                    setThresholds((current) =>
+                      editUsageLimitHandoffThreshold(current, selection.instanceId, value),
+                    )
+                  }
+                />
+              </>
+            ) : null}
             <IconButton
               icon="arrow.up"
               accessibilityLabel={`Move handoff provider ${index + 1} up`}
@@ -210,17 +244,24 @@ function HandoffOrderEditor(props: {
         }}
       />
       <Button
-        label="Save order"
+        label="Save handoff settings"
         tone="primary"
         disabled={props.disabled || !dirty}
-        onPress={() => props.onSave(usageLimitHandoffOrderPatch(draft))}
+        onPress={() =>
+          props.onSave(
+            usageLimitHandoffOrderPatch(draft, thresholdsChanged ? thresholds : undefined),
+          )
+        }
       />
       {dirty ? (
         <Button
           label="Cancel"
           tone="text"
           disabled={props.disabled}
-          onPress={() => setDraft(saved)}
+          onPress={() => {
+            setDraft(saved);
+            setThresholds(savedThresholds);
+          }}
         />
       ) : null}
     </View>

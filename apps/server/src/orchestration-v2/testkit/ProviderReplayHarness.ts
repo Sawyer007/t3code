@@ -287,6 +287,8 @@ export function layerWithRegistry<Error>(
   | EffectWorker.OrchestrationEffectWorkerV2
   | EventSink.EventSinkV2
   | ProviderSessionManager.ProviderSessionManagerV2
+  | ProjectionStore.ProjectionStoreV2
+  | ServerSettings.ServerSettingsService
   | CommandOutputRecorder.CommandOutputRecorder,
   Error | MigrationError | PlatformError.PlatformError | SqlError
 > {
@@ -540,6 +542,8 @@ export function layerWithRegistry<Error>(
     layerEventSinkProvided,
     layerContinuationWorkerProvided,
     layerCommandOutputHubProvided,
+    layerServerSettings,
+    layerStores,
   ).pipe(
     Layer.provide(ProviderTurnStartServiceTestkit.layer),
     Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),

@@ -13,6 +13,7 @@ import {
   resolvePendingHandoff,
   type HandoffTimelineRun,
   editUsageLimitHandoffOrder,
+  editUsageLimitHandoffThreshold,
   usageLimitHandoffOrderPatch,
 } from "./handoff.ts";
 
@@ -62,6 +63,20 @@ describe("automatic handoff order editing shared by clients", () => {
       autoHandoffLimitedThreads: false,
     });
     expect(usageLimitHandoffOrderPatch(order)).toEqual({ usageLimitHandoffOrder: order });
+  });
+
+  it("edits and clears a threshold without changing another account's threshold", () => {
+    const source = order[0]!.instanceId;
+    const target = order[1]!.instanceId;
+    const thresholds = editUsageLimitHandoffThreshold({ [target]: 85 }, source, "90");
+    expect(thresholds).toEqual({ [source]: 90, [target]: 85 });
+    expect(editUsageLimitHandoffThreshold(thresholds, source, "100")).toBe(thresholds);
+    expect(
+      usageLimitHandoffOrderPatch(order, editUsageLimitHandoffThreshold(thresholds, source, "")),
+    ).toEqual({
+      usageLimitHandoffOrder: order,
+      usageLimitHandoffThresholds: { [target]: 85 },
+    });
   });
 });
 

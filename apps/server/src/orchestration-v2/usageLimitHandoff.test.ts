@@ -12,7 +12,7 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import { nextUsageLimitHandoff } from "./usageLimitHandoff.ts";
+import { nextUsageLimitHandoff, usageHandoffThresholdReached } from "./usageLimitHandoff.ts";
 
 const order = ["first", "second", "third"].map((id): ModelSelection => ({
   instanceId: ProviderInstanceId.make(id),
@@ -95,6 +95,32 @@ function failedHistory(resetAt?: string) {
 }
 
 describe("automatic usage-limit handoff selection", () => {
+  it("skips accounts at their reserve threshold until the quota window resets", () => {
+    const second = {
+      ...providers[1]!,
+      usageLimits: {
+        checkedAt: "2026-10-18T01:00:00Z",
+        windows: [
+          {
+            id: "weekly",
+            kind: "weekly" as const,
+            label: "Weekly",
+            usedPercent: 90,
+            resetsAt: "2026-10-18T02:00:00Z",
+          },
+        ],
+      },
+    };
+    const thresholds = { [second.instanceId]: 90 };
+    const context = { ...input, thresholds, providers: [providers[0]!, second, providers[2]!] };
+    expect(usageHandoffThresholdReached(second, 91, input.nowMs)).toBe(false);
+    expect(usageHandoffThresholdReached(second, 90, input.nowMs)).toBe(true);
+    expect(nextUsageLimitHandoff(context)).toEqual(order[2]);
+    expect(nextUsageLimitHandoff({ ...context, providers })).toEqual(order[2]);
+    expect(
+      nextUsageLimitHandoff({ ...context, nowMs: Date.parse("2026-10-18T02:00:00Z") }),
+    ).toEqual(order[1]);
+  });
   it("follows the order and wraps from the last account to the first", () => {
     expect(nextUsageLimitHandoff(input)).toEqual(order[1]);
     expect(nextUsageLimitHandoff({ ...input, current: order[1]! })).toEqual(order[2]);

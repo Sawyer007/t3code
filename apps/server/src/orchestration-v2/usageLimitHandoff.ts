@@ -4,14 +4,39 @@ import type {
   OrchestrationV2ThreadProjection,
   RuntimeMode,
   ServerProvider,
+  UsageLimitHandoffThresholds,
 } from "@t3tools/contracts";
 import { latestRootProviderFailure, runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import * as DateTime from "effect/DateTime";
+
+function currentUsagePercent(
+  provider: ServerProvider | undefined,
+  nowMs: number,
+): number | undefined {
+  const limits = provider?.usageLimits;
+  if (!limits || limits.unavailable || limits.windows.length === 0) return undefined;
+  return Math.max(
+    ...limits.windows.map((window) =>
+      window.resetsAt !== undefined && Date.parse(window.resetsAt) <= nowMs
+        ? 0
+        : window.usedPercent,
+    ),
+  );
+}
+
+export function usageHandoffThresholdReached(
+  provider: ServerProvider | undefined,
+  threshold: number | undefined,
+  nowMs: number,
+): boolean {
+  return typeof threshold === "number" && (currentUsagePercent(provider, nowMs) ?? -1) >= threshold;
+}
 
 export function nextUsageLimitHandoff(input: {
   readonly order: ReadonlyArray<ModelSelection>;
   readonly current: ModelSelection;
   readonly providers: ReadonlyArray<ServerProvider>;
+  readonly thresholds?: UsageLimitHandoffThresholds;
   readonly runtimeMode: RuntimeMode;
   readonly nowMs: number;
   readonly history: Pick<OrchestrationV2ThreadProjection, "runs" | "turnItems">;
@@ -47,6 +72,7 @@ export function nextUsageLimitHandoff(input: {
   };
   return [...input.order.slice(index + 1), ...input.order.slice(0, index)].find((selection) => {
     const provider = providers.get(selection.instanceId);
+    const threshold = input.thresholds?.[selection.instanceId];
     return (
       provider !== undefined &&
       provider.enabled &&
@@ -68,6 +94,8 @@ export function nextUsageLimitHandoff(input: {
           window.usedPercent >= 100 &&
           (!window.resetsAt || !(Date.parse(window.resetsAt) <= input.nowMs)),
       ) &&
+      (typeof threshold !== "number" ||
+        (currentUsagePercent(provider, input.nowMs) ?? Infinity) < threshold) &&
       !previouslyLimited(provider)
     );
   });

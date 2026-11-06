@@ -1192,6 +1192,12 @@ const UsageLimitHandoffOrder = Schema.Array(ModelSelection).check(
   ),
 );
 
+const UsageLimitHandoffThresholds = Schema.Record(
+  ProviderInstanceId,
+  Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 99 })),
+);
+export type UsageLimitHandoffThresholds = typeof UsageLimitHandoffThresholds.Type;
+
 export const ServerSettings = Schema.Struct({
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1289,6 +1295,9 @@ export const ServerSettings = Schema.Struct({
   linkedEnvironmentsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 
   autoHandoffLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  usageLimitHandoffThresholds: UsageLimitHandoffThresholds.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   usageLimitHandoffOrder: UsageLimitHandoffOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
@@ -1668,6 +1677,7 @@ export const ServerSettingsPatch = Schema.Struct({
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   autoHandoffLimitedThreads: Schema.optionalKey(Schema.Boolean),
+  usageLimitHandoffThresholds: Schema.optionalKey(UsageLimitHandoffThresholds),
   usageLimitHandoffOrder: Schema.optionalKey(UsageLimitHandoffOrder),
   snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozePresets: Schema.optionalKey(SnoozePresetSettings),

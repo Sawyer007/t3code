@@ -384,6 +384,7 @@ export function applyServerSettingsPatch(
     worktreeCleanup: worktreeCleanupPatch,
     // Merged per entry below; its `null` removals must not reach deepMerge.
     usageLimitSources: usageLimitSourcesPatch,
+    usageLimitHandoffThresholds,
     secretProviders: secretProvidersPatch,
     sourceControlHosts: sourceControlHostsPatch,
     usagePriceOverrides: usagePriceOverridesPatch,
@@ -487,6 +488,7 @@ export function applyServerSettingsPatch(
     ...next,
     favorites,
     providerModelPreferences: nextModelPreferences,
+    ...(usageLimitHandoffThresholds === undefined ? {} : { usageLimitHandoffThresholds }),
     ...(worktreeCleanupPatch === undefined
       ? {}
       : {

@@ -8,6 +8,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   editUsageLimitHandoffOrder,
+  editUsageLimitHandoffThreshold,
   usageLimitHandoffOrderPatch,
 } from "@t3tools/client-runtime/handoff";
 import * as Equal from "effect/Equal";
@@ -27,6 +28,7 @@ import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import type { ModelEsque } from "../chat/providerIconUtils";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { useScopedSettings, useScopedSettingsWriteAllowed } from "./useScopedSettings";
@@ -65,7 +67,11 @@ export function AutoHandoffSettings() {
     <SettingsRow
       serverScoped
       {...searchableSetting("auto-handoff-limited-threads")}
-      settingKeys={["autoHandoffLimitedThreads", "usageLimitHandoffOrder"]}
+      settingKeys={[
+        "autoHandoffLimitedThreads",
+        "usageLimitHandoffOrder",
+        "usageLimitHandoffThresholds",
+      ]}
       description={
         singleEnvironment
           ? supported
@@ -87,11 +93,15 @@ export function AutoHandoffSettings() {
     >
       {environmentId && supported ? (
         <HandoffOrderEditor
-          key={`${environmentId}:${JSON.stringify(settings.usageLimitHandoffOrder)}`}
+          key={`${environmentId}:${JSON.stringify([settings.usageLimitHandoffOrder, settings.usageLimitHandoffThresholds])}`}
           environmentId={environmentId}
           settings={settings}
           entries={entries}
           models={models}
+          supportsThresholds={
+            environment?.serverConfig?.environment.capabilities
+              .automaticProviderHandoffThresholds === true
+          }
           disabled={disabled}
           onSave={save}
         />
@@ -105,12 +115,16 @@ function HandoffOrderEditor(props: {
   readonly settings: UnifiedSettings;
   readonly entries: ReadonlyArray<ProviderInstanceEntry>;
   readonly models: ReadonlyMap<ModelSelection["instanceId"], ReadonlyArray<ModelEsque>>;
+  readonly supportsThresholds: boolean;
   readonly disabled: boolean;
   readonly onSave: (patch: ServerSettingsPatch) => void;
 }) {
   const saved = props.settings.usageLimitHandoffOrder;
+  const savedThresholds = props.settings.usageLimitHandoffThresholds;
   const [draft, setDraft] = useState(saved);
-  const dirty = !Equal.equals(saved, draft);
+  const [thresholds, setThresholds] = useState(savedThresholds);
+  const thresholdsChanged = !Equal.equals(savedThresholds, thresholds);
+  const dirty = !Equal.equals(saved, draft) || thresholdsChanged;
   const nextEntry = props.entries.find(
     (entry) =>
       entry.enabled &&
@@ -131,6 +145,12 @@ function HandoffOrderEditor(props: {
         Add and save at least two provider accounts to enable handoff. After the last account, it
         starts from the top and skips unavailable or exhausted accounts. Accounts can share quota.
       </p>
+      {props.supportsThresholds ? (
+        <p className="text-xs text-muted-foreground">
+          Set Handoff at % to switch an active turn when the account reaches that usage. Leave it
+          blank to switch on the provider's usage-limit error.
+        </p>
+      ) : null}
       <ol className="space-y-2">
         {draft.map((selection, index) => {
           const entry = props.entries.find((entry) => entry.instanceId === selection.instanceId);
@@ -204,6 +224,29 @@ function HandoffOrderEditor(props: {
                   }
                 />
               ) : null}
+              {props.supportsThresholds ? (
+                <label className="flex items-center gap-2 text-xs">
+                  Handoff at %
+                  <Input
+                    className="w-20"
+                    inputMode="numeric"
+                    aria-label={`Handoff at percent for ${entry?.displayName ?? selection.instanceId}`}
+                    placeholder="Off"
+                    value={
+                      Object.hasOwn(thresholds, selection.instanceId)
+                        ? (thresholds[selection.instanceId] ?? "")
+                        : ""
+                    }
+                    disabled={props.disabled}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setThresholds((current) =>
+                        editUsageLimitHandoffThreshold(current, selection.instanceId, value),
+                      );
+                    }}
+                  />
+                </label>
+              ) : null}
               <div className="flex items-center gap-1">
                 <Button
                   variant="ghost"
@@ -271,16 +314,23 @@ function HandoffOrderEditor(props: {
         <Button
           size="sm"
           disabled={props.disabled || !dirty}
-          onClick={() => props.onSave(usageLimitHandoffOrderPatch(draft))}
+          onClick={() =>
+            props.onSave(
+              usageLimitHandoffOrderPatch(draft, thresholdsChanged ? thresholds : undefined),
+            )
+          }
         >
-          Save order
+          Save handoff settings
         </Button>
         {dirty ? (
           <Button
             variant="ghost"
             size="sm"
             disabled={props.disabled}
-            onClick={() => setDraft(saved)}
+            onClick={() => {
+              setDraft(saved);
+              setThresholds(savedThresholds);
+            }}
           >
             Cancel
           </Button>

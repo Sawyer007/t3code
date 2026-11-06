@@ -3,6 +3,7 @@ import type {
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
   OrchestrationV2ThreadHistoryPage,
+  ServerProvider,
 } from "@t3tools/contracts";
 import {
   latestExecutedRun,
@@ -77,6 +78,7 @@ import {
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { modelSwitchSince } from "./modelSwitch.ts";
+import { nextUsageLimitHandoff, usageHandoffThresholdReached } from "./usageLimitHandoff.ts";
 import { recordThreadOpen } from "@t3tools/shared/paletteSearch";
 import {
   backgroundWorkHoldsCompletion,
@@ -383,6 +385,10 @@ export interface OrchestratorV2Shape {
     readonly threadId: ThreadId;
     readonly limitRecovery: OrchestrationV2LimitRecoveryUpdate;
   }) => Effect.Effect<void, OrchestratorV2Error>;
+  readonly autoHandoffAtUsageThreshold: (
+    candidate: Pick<OrchestrationV2Run, "id" | "threadId" | "activeAttemptId">,
+    getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>,
+  ) => Effect.Effect<"waiting" | "skipped" | "handed_off", OrchestratorV2Error>;
   readonly searchThreadStream: (
     input: OrchestrationV2SearchThreadInput,
   ) => Stream.Stream<OrchestrationV2SearchThreadResult, OrchestratorV2Error>;
@@ -14111,6 +14117,88 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       return effectOutbox.awaitSettled(`effect:restart-continuation:${run.id}`).pipe(Effect.ignore);
     }),
     dispatch: dispatchWithReceipt,
+    autoHandoffAtUsageThreshold: Effect.fn("OrchestratorV2.autoHandoffAtUsageThreshold")(
+      function (candidate, getProviders) {
+        return threadDispatch.withLock(
+          candidate.threadId,
+          Effect.gen(function* () {
+            const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
+            if (!settings.autoHandoffLimitedThreads) return "skipped" as const;
+            const projection = yield* readCommandProjection(candidate.threadId);
+            const { thread } = projection;
+            const source = projection.runs.find((run) => run.id === candidate.id);
+            const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
+            if (
+              source?.status !== "running" ||
+              source.activeAttemptId === null ||
+              source.activeAttemptId !== candidate.activeAttemptId ||
+              !modelSelectionsEqual(thread.modelSelection, source.modelSelection) ||
+              !projection.providerTurns.some(
+                (turn) => turn.runAttemptId === source.activeAttemptId && turn.status === "running",
+              ) ||
+              thread.archivedAt !== null ||
+              thread.deletedAt !== null ||
+              thread.settledOverride === "settled" ||
+              isProviderNativeSubagentThread(thread) ||
+              projection.runtimeRequests.some((request) => request.status === "pending") ||
+              (thread.snoozedUntil != null && DateTime.toEpochMillis(thread.snoozedUntil) > nowMs)
+            )
+              return "skipped" as const;
+
+            const order = settings.usageLimitHandoffOrder.filter((selection) =>
+              resolveProjectProviderInstanceEnabled(
+                settings,
+                thread.projectId,
+                selection.instanceId,
+              ),
+            );
+            if (
+              order.length < 2 ||
+              !order.some((selection) => selection.instanceId === source.providerInstanceId)
+            ) {
+              return "skipped" as const;
+            }
+            const providers = yield* getProviders;
+            if (
+              !usageHandoffThresholdReached(
+                providers.find((provider) => provider.instanceId === source.providerInstanceId),
+                settings.usageLimitHandoffThresholds[source.providerInstanceId],
+                nowMs,
+              )
+            )
+              return "skipped" as const;
+
+            const target = nextUsageLimitHandoff({
+              order,
+              current: source.modelSelection,
+              providers,
+              thresholds: settings.usageLimitHandoffThresholds,
+              runtimeMode: thread.runtimeMode,
+              nowMs,
+              history: projection,
+            });
+            if (target === undefined) return "waiting" as const;
+
+            const identity = `limit-threshold-handoff:${thread.id}:${source.activeAttemptId}`;
+            const command = {
+              type: "message.dispatch",
+              commandId: CommandId.make(identity),
+              messageId: MessageId.make(identity),
+              threadId: thread.id,
+              modelSelection: target,
+              text: "Continue where you left off. The previous provider reached its configured usage threshold. Check the current workspace before continuing.",
+              attachments: [],
+              dispatchMode: { type: "restart_active", targetRunId: source.id },
+              createdBy: "user",
+              creationSource: "server",
+            } as const;
+            if (yield* stopReachedRun(command, thread.id, source.id)) return "skipped" as const;
+            yield* dispatchWithReceiptEffect(command);
+            return "handed_off" as const;
+          }),
+        );
+      },
+    ),
     autoArmLimitRecovery: Effect.fn("OrchestratorV2.autoArmLimitRecovery")(function (input) {
       return threadDispatch.withLock(
         input.threadId,

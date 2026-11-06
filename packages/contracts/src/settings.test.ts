@@ -44,6 +44,7 @@ describe("usage-limit handoff settings", () => {
   it("defaults off and preserves an ordered fallback list", () => {
     expect(decodeServerSettings({}).usageLimitHandoffOrder).toEqual([]);
     expect(decodeServerSettings({}).autoHandoffLimitedThreads).toBe(false);
+    expect(decodeServerSettings({}).usageLimitHandoffThresholds).toEqual({});
     const order = [
       { instanceId: "codex", model: "gpt-5.4" },
       { instanceId: "claude", model: "sonnet" },
@@ -64,6 +65,17 @@ describe("usage-limit handoff settings", () => {
     });
     expect(disabled.autoHandoffLimitedThreads).toBe(false);
     expect(disabled.usageLimitHandoffOrder).toEqual(order);
+  });
+
+  it("stores per-account usage thresholds as whole percentages below 100", () => {
+    const patch = decodeServerSettingsPatch({ usageLimitHandoffThresholds: { codex: 90 } });
+    const saved = encodeServerSettings(decodeServerSettings(patch));
+    expect(decodeServerSettings(saved).usageLimitHandoffThresholds).toEqual({ codex: 90 });
+    for (const invalid of [0, 90.5, 100]) {
+      expect(() =>
+        decodeServerSettingsPatch({ usageLimitHandoffThresholds: { codex: invalid } }),
+      ).toThrow();
+    }
   });
 
   it("rejects repeating an account with another model", () => {
