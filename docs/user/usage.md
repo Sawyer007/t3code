@@ -179,7 +179,7 @@ The automatic handoff extension continues a conversation with another configured
 when the current provider reports a usage limit. It runs on the server, so the client can disconnect
 while the server machine stays awake. It does not require another request to the exhausted provider.
 
-On web or desktop, open **Settings → General → Automatic provider handoff**. On mobile, open
+On web or desktop, open **Settings → Threads → Usage limits → Automatic provider handoff**. On mobile, open
 **Settings → Thread behavior → Automatic provider handoff**. Select one environment, add provider
 accounts, choose their models, and arrange the fallback order. Choose **Save order**, then turn on
 **Automatic provider handoff**. At least two saved accounts are needed. Switching off keeps the

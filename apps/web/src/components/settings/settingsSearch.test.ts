@@ -64,7 +64,7 @@ describe("searchSettings", () => {
       expect(searchSettings(query)).toContainEqual(
         expect.objectContaining({
           id: "auto-handoff-limited-threads",
-          to: "/settings/general",
+          to: "/settings/threads",
           targetId: "auto-handoff-limited-threads",
           scope: "environment",
         }),

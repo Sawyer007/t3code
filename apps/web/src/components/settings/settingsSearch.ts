@@ -450,7 +450,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "auto-handoff-limited-threads",
     title: "Automatic provider handoff",
-    to: "/settings/general",
+    to: "/settings/threads",
     targetId: "auto-handoff-limited-threads",
     searchTerms: [
       "usage quota rate limit fallback handoff provider account model order reasoning effort thinking automatic predaja",
