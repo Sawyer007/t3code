@@ -8,6 +8,12 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import {
+  releasePackageFiles,
+  updateReleasePackageVersions,
+} from "./update-release-package-versions.ts";
 
 const repoRoot = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 const isWindows = NodePath.sep === "\\";
@@ -102,7 +108,14 @@ if (!NodeFS.existsSync(serverAsar)) throw new Error(`No server.asar in ${resourc
 assertAppClosed();
 
 const work = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-auto-handoff-"));
+const buildLock = NodePath.join(repoRoot, ".desktop-build.lock");
+const restore = flag("--restore");
+let ownsBuildLock = false;
 try {
+  if (!restore) {
+    NodeFS.mkdirSync(buildLock);
+    ownsBuildLock = true;
+  }
   // `extract-file` writes into its working directory, so keep it out of the checkout.
   run(
     "npx",
@@ -148,7 +161,7 @@ try {
     );
   }
 
-  if (flag("--restore")) {
+  if (restore) {
     if (isPatched) {
       NodeFS.copyFileSync(backupAsar, serverAsar);
       if (NodeFS.existsSync(backupUnpacked))
@@ -188,8 +201,24 @@ try {
   if (!flag("--no-build")) {
     const vp = NodePath.join(repoRoot, "node_modules", ".bin", isWindows ? "vp.cmd" : "vp");
     const env = officialClientEnv(stageDist, installed.version);
-    run(vp, ["run", "build:bundle"], NodePath.join(repoRoot, "apps", "server"), env);
-    run(vp, ["build"], NodePath.join(repoRoot, "apps", "web"), env);
+    // The server embeds its manifest version. Release builds stamp it before bundling.
+    const manifests = releasePackageFiles.map((relativePath) => {
+      const path = NodePath.join(repoRoot, relativePath);
+      return { path, original: NodeFS.readFileSync(path) };
+    });
+    try {
+      await Effect.runPromise(
+        updateReleasePackageVersions(installed.version, { rootDir: repoRoot }).pipe(
+          Effect.provide(NodeServices.layer),
+        ),
+      );
+      run(vp, ["run", "build:bundle"], NodePath.join(repoRoot, "apps", "server"), env);
+      run(vp, ["build"], NodePath.join(repoRoot, "apps", "web"), env);
+    } finally {
+      for (const { path, original } of manifests) {
+        if (!original.equals(NodeFS.readFileSync(path))) NodeFS.writeFileSync(path, original);
+      }
+    }
   }
 
   const serverDist = NodePath.join(repoRoot, "apps", "server", "dist");
@@ -221,10 +250,15 @@ try {
   const built = NodePath.join(work, "server.asar");
   asar("pack", stage, built, "--unpack", "*.{node,dll,exe}");
 
+  assertAppClosed();
   NodeFS.copyFileSync(built, serverAsar);
   NodeFS.cpSync(`${built}.unpacked`, unpackedDir, { recursive: true });
   console.log(`Installed the patched server into ${resourcesDir} (app ${installed.version}).`);
   console.log("Undo with: node scripts/install-auto-handoff.ts --restore");
 } finally {
-  NodeFS.rmSync(work, { recursive: true, force: true });
+  try {
+    NodeFS.rmSync(work, { recursive: true, force: true });
+  } finally {
+    if (ownsBuildLock) NodeFS.rmdirSync(buildLock);
+  }
 }
